@@ -17,6 +17,7 @@
 
 #include "BKE_context.h"
 #include "BKE_gpencil.h"
+#include "BKE_gpencil_update_cache.h"
 #include "BKE_key.h"
 #include "BKE_mask.h"
 #include "BKE_nla.h"
@@ -40,6 +41,9 @@ typedef struct tGPFtransdata {
     float loc[3]; /* #td->val and #td->loc share the same pointer. */
   };
   int *sdata; /* pointer to gpf->framenum */
+  bGPdata *gpd;
+  bGPDlayer *gpl;
+  bGPDframe *gpf;
 } tGPFtransdata;
 
 /* -------------------------------------------------------------------- */
@@ -219,6 +223,7 @@ static TransData *ActionFCurveToTransData(TransData *td,
  */
 static int GPLayerToTransData(TransData *td,
                               tGPFtransdata *tfd,
+                              bGPdata *gpd,
                               bGPDlayer *gpl,
                               char side,
                               float cfra,
@@ -240,6 +245,10 @@ static int GPLayerToTransData(TransData *td,
 
         td->center[0] = td->ival;
         td->center[1] = ypos;
+
+        tfd->gpd = gpd;
+        tfd->gpl = gpl;
+        tfd->gpf = gpf;
 
         /* Advance `td` now. */
         td++;
@@ -410,12 +419,18 @@ static void createTransActionData(bContext *C, TransInfo *t)
     }
 
     if (ale->type == ANIMTYPE_GPLAYER) {
+      bGPdata *gpd = (bGPdata *)ale->id;
       bGPDlayer *gpl = (bGPDlayer *)ale->data;
       int i;
 
-      i = GPLayerToTransData(td, tfd, gpl, t->frame_side, cfra, is_prop_edit, ypos);
+      i = GPLayerToTransData(td, tfd, gpd, gpl, t->frame_side, cfra, is_prop_edit, ypos);
       td += i;
       tfd += i;
+
+      /* Tag this layer, so we can update it later in special_aftertrans_update__actedit. */
+      if (i > 0) {
+        gpl->runtime.tag = true;
+      }
     }
     else if (ale->type == ANIMTYPE_MASKLAYER) {
       MaskLayer *masklay = (MaskLayer *)ale->data;
@@ -562,6 +577,7 @@ static void flushTransIntFrameActionData(TransInfo *t)
    * Expects data_gpf_len to be set in the data container. */
   for (int i = 0; i < tc->data_gpf_len; i++, tfd++) {
     *(tfd->sdata) = round_fl_to_int(tfd->val);
+    BKE_gpencil_tag_light_update(tfd->gpd, tfd->gpl, tfd->gpf, NULL);
   }
 }
 
@@ -623,6 +639,10 @@ static void recalcData_actedit(TransInfo *t)
      */
     if ((saction->flag & SACTION_NOREALTIMEUPDATES) == 0) {
       for (ale = anim_data.first; ale; ale = ale->next) {
+        /* Skip unmodified gpencil layers. */
+        if (ale->datatype == ALE_GPFRAME && !((bGPDlayer *)(ale->data))->runtime.tag) {
+          continue;
+        }
         /* set refresh tags for objects using this animation */
         ANIM_list_elem_update(CTX_data_main(t->context), t->scene, ale);
       }
@@ -694,34 +714,32 @@ static void posttrans_mask_clean(Mask *mask)
  * It also makes sure gp-frames are still stored in chronological order after
  * transform.
  */
-static void posttrans_gpd_clean(bGPdata *gpd)
+static void posttrans_gpd_clean(bGPdata *gpd, bGPDlayer *gpl)
 {
-  bGPDlayer *gpl;
+  bGPDframe *gpf, *gpfn;
+  bool is_double = false;
 
-  for (gpl = gpd->layers.first; gpl; gpl = gpl->next) {
-    bGPDframe *gpf, *gpfn;
-    bool is_double = false;
+  BKE_gpencil_layer_frames_sort(gpl, &is_double);
 
-    BKE_gpencil_layer_frames_sort(gpl, &is_double);
-
-    if (is_double) {
-      for (gpf = gpl->frames.first; gpf; gpf = gpfn) {
-        gpfn = gpf->next;
-        if (gpfn && gpf->framenum == gpfn->framenum) {
-          BKE_gpencil_layer_frame_delete(gpl, gpf);
-        }
+  if (is_double) {
+    for (gpf = gpl->frames.first; gpf; gpf = gpfn) {
+      gpfn = gpf->next;
+      if (gpfn && gpf->framenum == gpfn->framenum) {
+        BKE_gpencil_layer_frame_delete(gpl, gpf);
       }
     }
+  }
 
 #ifdef DEBUG
-    for (gpf = gpl->frames.first; gpf; gpf = gpf->next) {
-      BLI_assert(!gpf->next || gpf->framenum < gpf->next->framenum);
-    }
-#endif
+  for (gpf = gpl->frames.first; gpf; gpf = gpf->next) {
+    BLI_assert(!gpf->next || gpf->framenum < gpf->next->framenum);
   }
-  /* set cache flag to dirty */
-  DEG_id_tag_update(&gpd->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
+#endif
 
+  BKE_gpencil_tag_full_update(gpd, gpl, NULL, NULL);
+
+  /* set cache flag to dirty */
+  DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
   WM_main_add_notifier(NC_GPENCIL | NA_EDITED, gpd);
 }
 
@@ -784,11 +802,26 @@ static void special_aftertrans_update__actedit(bContext *C, TransInfo *t)
 
     for (ale = anim_data.first; ale; ale = ale->next) {
       switch (ale->datatype) {
-        case ALE_GPFRAME:
+        case ALE_GPFRAME: {
           ale->id->tag &= ~LIB_TAG_DOIT;
-          posttrans_gpd_clean((bGPdata *)ale->id);
-          break;
+          bGPdata *gpd = (bGPdata *)ale->id;
+          bGPDlayer *gpl = (bGPDlayer *)ale->data;
+          if (!gpl->runtime.tag) {
+            continue;
+          }
 
+          posttrans_gpd_clean(gpd, (bGPDlayer *)ale->data);
+
+          if (canceled && U.experimental.use_gpencil_undo_system) {
+            /* If transform was canceled, no undo step will be encoded. But if the gpencil undo
+             * system is used, we need to make sure to mark the cache as disposable. So we do this
+             * here ourselves, so that the next depsgraph update clears the cache. */
+            gpd->flag |= GP_DATA_UPDATE_CACHE_DISPOSABLE;
+          }
+
+          gpl->runtime.tag = false;
+          break;
+        }
         case ALE_FCURVE: {
           AnimData *adt = ANIM_nla_mapping_get(&ac, ale);
           FCurve *fcu = (FCurve *)ale->key_data;
@@ -861,7 +894,7 @@ static void special_aftertrans_update__actedit(bContext *C, TransInfo *t)
       LISTBASE_FOREACH (bAnimListElem *, ale, &anim_data) {
         if (ale->datatype == ALE_GPFRAME) {
           ale->id->tag &= ~LIB_TAG_DOIT;
-          posttrans_gpd_clean((bGPdata *)ale->id);
+          posttrans_gpd_clean((bGPdata *)ale->id, (bGPDlayer *)ale->data);
         }
       }
       ANIM_animdata_freelist(&anim_data);

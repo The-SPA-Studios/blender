@@ -392,7 +392,11 @@ enum {
  * Disable zbuffer offset, skip calls to #ED_view3d_polygon_offset.
  * Use when precise surface depth is needed and picking bias isn't, see T45434).
  */
-#define RV3D_ZOFFSET_DISABLED 64
+#define RV3D_ZOFFSET_DISABLED (1 << 6)
+
+/** #RegionView3D.rflag - SPA custom flags. */
+/** View mirroring. */
+#define RV3D_VIEW_MIRROR_X (1 << 15)
 
 /** #RegionView3D.viewlock */
 enum {

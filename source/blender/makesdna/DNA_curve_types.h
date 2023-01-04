@@ -503,6 +503,8 @@ typedef enum eBezTriple_KeyframeType {
   BEZT_KEYTYPE_BREAKDOWN = 2, /* 'breakdown' keyframe */
   BEZT_KEYTYPE_JITTER = 3,    /* 'jitter' keyframe (for adding 'filler' secondary motion) */
   BEZT_KEYTYPE_MOVEHOLD = 4,  /* one end of a 'moving hold' */
+  /* Keep last. */
+  BEZT_KEYTYPE_TOT,
 } eBezTriple_KeyframeType;
 
 /* checks if the given BezTriple is selected */

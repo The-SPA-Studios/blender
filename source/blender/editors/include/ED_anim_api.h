@@ -30,6 +30,7 @@ struct bContext;
 struct wmKeyConfig;
 
 struct Object;
+struct Base;
 struct Scene;
 
 struct bDopeSheet;
@@ -178,6 +179,12 @@ typedef struct bAnimListElem {
    * for per-element F-Curves
    * (e.g. NLA Control Curves), the element that this represents (e.g. NlaStrip) */
   void *owner;
+
+  /**
+   * Pointer to the Base (Object) of the element. Can be NULL (e.g. annotations do not belong to an object).
+   * E.g. used by the sync selection feature when switching the active object through selecting
+   * channels. */
+  struct Base *base;
 } bAnimListElem;
 
 /**

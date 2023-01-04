@@ -28,6 +28,7 @@
 #include "DNA_curves_types.h"
 #include "DNA_genfile.h"
 #include "DNA_gpencil_modifier_types.h"
+#include "DNA_gpencil_types.h"
 #include "DNA_lineart_types.h"
 #include "DNA_listBase.h"
 #include "DNA_mask_types.h"
@@ -52,6 +53,7 @@
 #include "BKE_deform.h"
 #include "BKE_fcurve.h"
 #include "BKE_fcurve_driver.h"
+#include "BKE_gpencil.h"
 #include "BKE_idprop.h"
 #include "BKE_image.h"
 #include "BKE_lib_id.h"
@@ -2764,6 +2766,21 @@ void blo_do_versions_300(FileData *fd, Library *UNUSED(lib), Main *bmain)
         SEQ_for_each_callback(&scene->ed->seqbase, seq_transform_filter_set, NULL);
       }
     }
+
+    LISTBASE_FOREACH (bGPdata *, gpd, &bmain->gpencils) {
+      LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
+        LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+          BKE_gpencil_frame_reset_transformation(gpf);
+        }
+      }
+      if (gpd->onion_keytype == -1) {
+        gpd->onion_keytype = GP_KEYFILTER_ALL;
+      }
+      else {
+        /* Convert enum into a flag. */
+        gpd->onion_keytype = (1 << gpd->onion_keytype);
+      }
+    }
   }
 
   if (!MAIN_VERSION_ATLEAST(bmain, 302, 6)) {
@@ -3129,6 +3146,44 @@ void blo_do_versions_300(FileData *fd, Library *UNUSED(lib), Main *bmain)
         settings->curve_length = 0.3f;
       }
     }
+
+    /* Default to automatic UV generation. */
+    LISTBASE_FOREACH (bGPdata *, gpd, &bmain->gpencils) {
+      LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
+        LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+          LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
+            gps->flag &= ~GP_STROKE_NO_AUTOMATIC_FILL_UVS;
+          }
+        }
+      }
+    }
+  }
+
+  if (!MAIN_VERSION_ATLEAST(bmain, 303, 4)) {
+    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+      if (ntree->type == NTREE_COMPOSIT) {
+        LISTBASE_FOREACH (bNode *, node, &ntree->nodes) {
+          if (node->type == CMP_NODE_OUTPUT_FILE) {
+            LISTBASE_FOREACH (bNodeSocket *, sock, &node->inputs) {
+              if (sock->storage) {
+                NodeImageMultiFileSocket *sockdata = (NodeImageMultiFileSocket *)sock->storage;
+                version_fix_image_format_copy(bmain, &sockdata->format);
+              }
+            }
+
+            if (node->storage) {
+              NodeImageMultiFile *nimf = (NodeImageMultiFile *)node->storage;
+              version_fix_image_format_copy(bmain, &nimf->format);
+            }
+          }
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
+
+    LISTBASE_FOREACH (Scene *, scene, &bmain->scenes) {
+      version_fix_image_format_copy(bmain, &scene->r.im_format);
+    }
   }
 
   if (!MAIN_VERSION_ATLEAST(bmain, 302, 14)) {
@@ -3325,5 +3380,44 @@ void blo_do_versions_300(FileData *fd, Library *UNUSED(lib), Main *bmain)
    */
   {
     /* Keep this block, even when empty. */
+
+    /* Fix for T98925 - remove channels region, that was initialized in incorrect editor types. */
+    for (bScreen *screen = bmain->screens.first; screen; screen = screen->id.next) {
+      LISTBASE_FOREACH (ScrArea *, area, &screen->areabase) {
+        LISTBASE_FOREACH (SpaceLink *, sl, &area->spacedata) {
+          if (ELEM(sl->spacetype, SPACE_ACTION, SPACE_CLIP, SPACE_GRAPH, SPACE_NLA, SPACE_SEQ)) {
+            continue;
+          }
+
+          ListBase *regionbase = (sl == area->spacedata.first) ? &area->regionbase :
+                                                                 &sl->regionbase;
+          ARegion *channels_region = BKE_region_find_in_listbase_by_type(regionbase,
+                                                                         RGN_TYPE_CHANNELS);
+          if (channels_region) {
+            BLI_freelinkN(regionbase, channels_region);
+          }
+        }
+      }
+    }
+    /* Fix for T101622 - update flags of sequence editor regions that were not initialized
+     * properly. */
+    LISTBASE_FOREACH (bScreen *, screen, &bmain->screens) {
+      LISTBASE_FOREACH (ScrArea *, area, &screen->areabase) {
+        LISTBASE_FOREACH (SpaceLink *, sl, &area->spacedata) {
+          ListBase *regionbase = (sl == area->spacedata.first) ? &area->regionbase :
+                                                                 &sl->regionbase;
+          if (sl->spacetype == SPACE_SEQ) {
+            LISTBASE_FOREACH (ARegion *, region, regionbase) {
+              if (region->regiontype == RGN_TYPE_TOOLS) {
+                region->v2d.flag &= ~V2D_VIEWSYNC_AREA_VERTICAL;
+              }
+              if (region->regiontype == RGN_TYPE_CHANNELS) {
+                region->v2d.flag |= V2D_VIEWSYNC_AREA_VERTICAL;
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }

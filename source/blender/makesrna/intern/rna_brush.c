@@ -261,6 +261,22 @@ const EnumPropertyItem rna_enum_brush_curves_sculpt_tool_items[] = {
 /* clang-format on */
 
 #ifndef RNA_RUNTIME
+static EnumPropertyItem rna_enum_gpencil_brush_sample_modes_items[] = {
+    {GP_BRUSH_SAMPLE_DEFAULT,
+     "DEFAULT",
+     0,
+     "Default",
+     "Use the samples from the input device, apply no resampling"},
+    {GP_BRUSH_SAMPLE_FIXED, "FIXED", 0, "Fixed", "Use resampling based on a fixed length"},
+    {GP_BRUSH_SAMPLE_ADAPTIVE,
+     "ADAPTIVE",
+     0,
+     "Adaptive",
+     "Use resampling based on a threshold value, removes detail in straight lines, keeps detail "
+     "in curved segments"},
+    {0, NULL, 0, NULL, NULL},
+};
+
 static EnumPropertyItem rna_enum_gpencil_brush_eraser_modes_items[] = {
     {GP_BRUSH_ERASER_SOFT,
      "SOFT",
@@ -1383,6 +1399,7 @@ static void rna_def_gpencil_options(BlenderRNA *brna)
   prop = RNA_def_property(srna, "pen_smooth_steps", PROP_INT, PROP_NONE);
   RNA_def_property_int_sdna(prop, NULL, "draw_smoothlvl");
   RNA_def_property_range(prop, 0, 100);
+  RNA_def_property_ui_range(prop, 0, 25, 1, 3);
   RNA_def_property_ui_text(prop, "Iterations", "Number of times to smooth newly created strokes");
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, NULL);
@@ -1401,10 +1418,10 @@ static void rna_def_gpencil_options(BlenderRNA *brna)
   /* Simplify factor */
   prop = RNA_def_property(srna, "simplify_factor", PROP_FLOAT, PROP_NONE);
   RNA_def_property_float_sdna(prop, NULL, "simplify_f");
-  RNA_def_property_range(prop, 0, 100.0);
-  RNA_def_property_ui_range(prop, 0, 100.0, 1.0f, 3);
+  RNA_def_property_range(prop, 0, 10.0);
+  RNA_def_property_ui_range(prop, 0, 1.0, 1.0f, 3);
   RNA_def_property_ui_text(prop, "Simplify", "Factor of Simplify using adaptive algorithm");
-  RNA_def_parameter_clear_flags(prop, PROP_ANIMATABLE, 0);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
 
   /* Curves for pressure */
   prop = RNA_def_property(srna, "curve_sensitivity", PROP_POINTER, PROP_NONE);
@@ -1536,13 +1553,29 @@ static void rna_def_gpencil_options(BlenderRNA *brna)
 
   prop = RNA_def_property(srna, "input_samples", PROP_INT, PROP_NONE);
   RNA_def_property_int_sdna(prop, NULL, "input_samples");
-  RNA_def_property_range(prop, 0, GP_MAX_INPUT_SAMPLES);
+  RNA_def_property_range(prop, 0, 100);
+  RNA_def_property_ui_range(prop, 0.0, 5.0, 1.0, 1);
   RNA_def_property_ui_text(
       prop,
       "Input Samples",
       "Generate intermediate points for very fast mouse movements. Set to 0 to disable");
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, NULL);
+
+  prop = RNA_def_property(srna, "sample_distance", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_float_sdna(prop, NULL, "sample_distance");
+  RNA_def_property_range(prop, 0.01f, 10.0f);
+  RNA_def_property_ui_range(prop, 0.5, 2.0, 1.0, 2);
+  RNA_def_property_ui_text(
+      prop, "Distance", "Sampling distance for fixed sampling in percentage of stroke diameter");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, NULL);
+
+  prop = RNA_def_property(srna, "use_settings_active_smoothing", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "flag", GP_BRUSH_USE_ACTIVE_SMOOTHING);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_ui_text(prop, "Use Active Smoothing", "Use a smoothing method while drawing");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
 
   /* active smooth factor while drawing */
   prop = RNA_def_property(srna, "active_smooth_factor", PROP_FLOAT, PROP_FACTOR);
@@ -1767,6 +1800,34 @@ static void rna_def_gpencil_options(BlenderRNA *brna)
                            "override while drawing");
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
 
+  prop = RNA_def_property(srna, "use_settings_curve_smoothing", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "flag", GP_BRUSH_USE_CURVE_SMOOTHING);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_ui_text(
+      prop, "Use Curve Smoothing", "Use a curve fitting method to smooth the drawn stroke");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+
+  prop = RNA_def_property(srna, "curve_smooth_threshold", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, NULL, "curve_smooth_threshold");
+  RNA_def_property_range(prop, 0.0, 10.0);
+  RNA_def_property_ui_range(prop, 0.0, 1.0, 0.1f, 3);
+  RNA_def_property_ui_text(prop, "Threshold", "Threshold to use for the curve fitting algorithm");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+
+  prop = RNA_def_property(srna, "curve_smooth_factor", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, NULL, "curve_smooth_factor");
+  RNA_def_property_range(prop, 0.0, 1.0);
+  RNA_def_property_ui_range(prop, 0.0, 1.0, 1.0f, 3);
+  RNA_def_property_ui_text(
+      prop, "Factor", "Interpolation factor between the fitted curve and the original stroke");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+
+  prop = RNA_def_property(srna, "sample_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, NULL, "sample_mode");
+  RNA_def_property_enum_items(prop, rna_enum_gpencil_brush_sample_modes_items);
+  RNA_def_property_ui_text(prop, "Mode", "Sample Mode");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+
   prop = RNA_def_property(srna, "eraser_mode", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, NULL, "eraser_mode");
   RNA_def_property_enum_items(prop, rna_enum_gpencil_brush_eraser_modes_items);
@@ -1818,6 +1879,12 @@ static void rna_def_gpencil_options(BlenderRNA *brna)
   RNA_def_property_boolean_sdna(prop, NULL, "flag", GP_BRUSH_TRIM_STROKE);
   RNA_def_property_boolean_default(prop, false);
   RNA_def_property_ui_text(prop, "Trim Stroke Ends", "Trim intersecting stroke ends");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+
+  prop = RNA_def_property(srna, "use_active_layer", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "flag", GP_BRUSH_ERASER_ACTIVE_LAYER);
+  RNA_def_property_boolean_default(prop, false);
+  RNA_def_property_ui_text(prop, "Use Active Layer", "Only affect the active layer when erasing");
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
 
   prop = RNA_def_property(srna, "direction", PROP_ENUM, PROP_NONE);

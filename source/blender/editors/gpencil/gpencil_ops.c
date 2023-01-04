@@ -542,6 +542,8 @@ void ED_operatortypes_gpencil(void)
   WM_operatortype_append(GPENCIL_OT_select_random);
   WM_operatortype_append(GPENCIL_OT_select_vertex_color);
 
+  WM_operatortype_append(GPENCIL_OT_pick_active_layer);
+
   WM_operatortype_append(GPENCIL_OT_duplicate);
   WM_operatortype_append(GPENCIL_OT_delete);
   WM_operatortype_append(GPENCIL_OT_dissolve);
@@ -673,6 +675,10 @@ void ED_operatortypes_gpencil(void)
   WM_operatortype_append(GPENCIL_OT_interpolate_sequence);
   WM_operatortype_append(GPENCIL_OT_interpolate_reverse);
 
+  /* Shift & Trace */
+  WM_operatortype_append(GPENCIL_OT_reset_frame_transforms);
+  WM_operatortype_append(GPENCIL_OT_pick_frame_offset);
+
   /* Primitives */
   WM_operatortype_append(GPENCIL_OT_primitive_box);
   WM_operatortype_append(GPENCIL_OT_primitive_line);
@@ -685,6 +691,9 @@ void ED_operatortypes_gpencil(void)
 
   /* armatures */
   WM_operatortype_append(GPENCIL_OT_generate_weights);
+
+  WM_operatortype_append(GPENCIL_OT_cache_ghost_frame_transformations);
+  WM_operatortype_append(GPENCIL_OT_clear_ghost_frame_transformation_cache);
 }
 
 void ED_operatormacros_gpencil(void)

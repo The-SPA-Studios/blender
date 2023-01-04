@@ -127,7 +127,6 @@ static SpaceLink *sequencer_create(const ScrArea *UNUSED(area), const Scene *sce
   region->regiontype = RGN_TYPE_TOOLS;
   region->alignment = RGN_ALIGN_LEFT;
   region->flag = RGN_FLAG_HIDDEN;
-  region->v2d.flag |= V2D_VIEWSYNC_AREA_VERTICAL;
 
   /* Channels. */
   region = MEM_callocN(sizeof(ARegion), "channels for sequencer");
@@ -135,6 +134,7 @@ static SpaceLink *sequencer_create(const ScrArea *UNUSED(area), const Scene *sce
   BLI_addtail(&sseq->regionbase, region);
   region->regiontype = RGN_TYPE_CHANNELS;
   region->alignment = RGN_ALIGN_LEFT;
+  region->v2d.flag |= V2D_VIEWSYNC_AREA_VERTICAL;
 
   /* Preview region. */
   /* NOTE: if you change values here, also change them in sequencer_init_preview_region. */
@@ -420,6 +420,16 @@ static int /*eContextResult*/ sequencer_context(const bContext *C,
     if (mask) {
       CTX_data_id_pointer_set(result, &mask->id);
     }
+    return CTX_RESULT_OK;
+  }
+  /* Scene override for the sequencer. */
+  if (CTX_data_equals(member, "scene")) {
+    SpaceSeq *sseq = CTX_wm_space_seq(C);
+    /* Check if scene is overwritten. */
+    if ((sseq != NULL) && (sseq->scene_override != NULL)) {
+      scene = sseq->scene_override;
+    }
+    CTX_data_id_pointer_set(result, &scene->id);
     return CTX_RESULT_OK;
   }
 

@@ -426,6 +426,8 @@ typedef struct wmGizmoGroupType {
   wmGizmoGroupFnDrawPrepare draw_prepare;
   /** Initialize data for before invoke. */
   wmGizmoGroupFnInvokePrepare invoke_prepare;
+  /** Cleanup any data after the gizmo interaction finished. */
+  wmGizmoGroupFnExitCleanup exit_cleanup;
 
   /** Keymap init callback for this gizmo-group (optional),
    * will fall back to default tweak keymap when left NULL. */

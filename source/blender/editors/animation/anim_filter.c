@@ -1749,10 +1749,8 @@ static size_t animdata_filter_shapekey(bAnimContext *ac,
 }
 
 /* Helper for Grease Pencil - layers within a data-block. */
-static size_t animdata_filter_gpencil_layers_data(ListBase *anim_data,
-                                                  bDopeSheet *ads,
-                                                  bGPdata *gpd,
-                                                  int filter_mode)
+static size_t animdata_filter_gpencil_layers_data(
+    ListBase *anim_data, bDopeSheet *ads, Base *base, bGPdata *gpd, int filter_mode)
 {
   bGPDlayer *gpl;
   size_t items = 0;
@@ -1786,17 +1784,15 @@ static size_t animdata_filter_gpencil_layers_data(ListBase *anim_data,
     }
 
     /* add to list */
-    ANIMCHANNEL_NEW_CHANNEL(gpl, ANIMTYPE_GPLAYER, gpd, NULL);
+    ANIMCHANNEL_NEW_CHANNEL_FULL(gpl, ANIMTYPE_GPLAYER, gpd, NULL, { ale->base = base; });
   }
 
   return items;
 }
 
 /* Helper for Grease Pencil - Grease Pencil data-block - GP Frames. */
-static size_t animdata_filter_gpencil_data(ListBase *anim_data,
-                                           bDopeSheet *ads,
-                                           bGPdata *gpd,
-                                           int filter_mode)
+static size_t animdata_filter_gpencil_data(
+    ListBase *anim_data, bDopeSheet *ads, Base *base, bGPdata *gpd, int filter_mode)
 {
   size_t items = 0;
 
@@ -1815,7 +1811,7 @@ static size_t animdata_filter_gpencil_data(ListBase *anim_data,
     if (!(filter_mode & ANIMFILTER_FCURVESONLY)) {
       /* add gpencil animation channels */
       BEGIN_ANIMFILTER_SUBCHANNELS (EXPANDED_GPD(gpd)) {
-        tmp_items += animdata_filter_gpencil_layers_data(&tmp_data, ads, gpd, filter_mode);
+        tmp_items += animdata_filter_gpencil_layers_data(&tmp_data, ads, base, gpd, filter_mode);
       }
       END_ANIMFILTER_SUBCHANNELS;
     }
@@ -1859,7 +1855,7 @@ static size_t animdata_filter_gpencil(bAnimContext *ac,
       (ads->filterflag & ADS_FILTER_INCL_HIDDEN)) {
     LISTBASE_FOREACH (bGPdata *, gpd, &ac->bmain->gpencils) {
       if (gpd->flag & GP_DATA_ANNOTATIONS) {
-        items += animdata_filter_gpencil_data(anim_data, ads, gpd, filter_mode);
+        items += animdata_filter_gpencil_data(anim_data, ads, NULL, gpd, filter_mode);
       }
     }
   }
@@ -1894,8 +1890,10 @@ static size_t animdata_filter_gpencil(bAnimContext *ac,
 
       /* check selection and object type filters */
       if ((ads->filterflag & ADS_FILTER_ONLYSEL) && !((base->flag & BASE_SELECTED))) {
-        /* only selected should be shown */
-        continue;
+        /* Only show selected + active object if filter option is enabled. */
+        if (!(ads->filterflag & ADS_FILTER_INCL_OBACT) || (BASACT(view_layer) != base)) {
+          continue;
+        }
       }
 
       /* check if object belongs to the filtering group if option to filter
@@ -1910,7 +1908,7 @@ static size_t animdata_filter_gpencil(bAnimContext *ac,
 
       /* finally, include this object's grease pencil data-block. */
       /* XXX: Should we store these under expanders per item? */
-      items += animdata_filter_gpencil_data(anim_data, ads, ob->data, filter_mode);
+      items += animdata_filter_gpencil_data(anim_data, ads, base, ob->data, filter_mode);
     }
   }
 
@@ -1918,9 +1916,12 @@ static size_t animdata_filter_gpencil(bAnimContext *ac,
   return items;
 }
 
-/* Helper for Grease Pencil data integrated with main DopeSheet */
-static size_t animdata_filter_ds_gpencil(
-    bAnimContext *ac, ListBase *anim_data, bDopeSheet *ads, bGPdata *gpd, int filter_mode)
+static size_t animdata_filter_ds_gpencil_data(bAnimContext *ac,
+                                              ListBase *anim_data,
+                                              bDopeSheet *ads,
+                                              Base *base,
+                                              bGPdata *gpd,
+                                              int filter_mode)
 {
   ListBase tmp_data = {NULL, NULL};
   size_t tmp_items = 0;
@@ -1933,7 +1934,7 @@ static size_t animdata_filter_ds_gpencil(
 
     /* add Grease Pencil layers */
     if (!(filter_mode & ANIMFILTER_FCURVESONLY)) {
-      tmp_items += animdata_filter_gpencil_layers_data(&tmp_data, ads, gpd, filter_mode);
+      tmp_items += animdata_filter_gpencil_layers_data(&tmp_data, ads, base, gpd, filter_mode);
     }
 
     /* TODO: do these need a separate expander?
@@ -1960,6 +1961,24 @@ static size_t animdata_filter_ds_gpencil(
 
   /* return the number of items added to the list */
   return items;
+}
+
+static size_t animdata_filter_ds_annotations(
+    bAnimContext *ac, ListBase *anim_data, bDopeSheet *ads, bGPdata *gpd, int filter_mode)
+{
+  return animdata_filter_ds_gpencil_data(ac, anim_data, ads, NULL, gpd, filter_mode);
+}
+
+/* Helper for Grease Pencil data integrated with main DopeSheet */
+static size_t animdata_filter_ds_gpencil(
+    bAnimContext *ac, ListBase *anim_data, bDopeSheet *ads, Base *base, int filter_mode)
+{
+  Object *ob = base->object;
+  bGPdata *gpd = (bGPdata *)ob->data;
+
+  /* return the number of items added to the list */
+  return animdata_filter_ds_gpencil_data(ac, anim_data, ads, base, gpd, filter_mode);
+  ;
 }
 
 /* Helper for Cache File data integrated with main DopeSheet */
@@ -2833,7 +2852,7 @@ static size_t animdata_filter_dopesheet_ob(
 
     /* grease pencil */
     if ((ob->type == OB_GPENCIL) && (ob->data) && !(ads->filterflag & ADS_FILTER_NOGPENCIL)) {
-      tmp_items += animdata_filter_ds_gpencil(ac, &tmp_data, ads, ob->data, filter_mode);
+      tmp_items += animdata_filter_ds_gpencil(ac, &tmp_data, ads, base, filter_mode);
     }
   }
   END_ANIMFILTER_SUBCHANNELS;
@@ -2992,9 +3011,9 @@ static size_t animdata_filter_dopesheet_scene(
       tmp_items += animdata_filter_ds_linestyle(ac, &tmp_data, ads, sce, filter_mode);
     }
 
-    /* grease pencil */
-    if ((gpd) && !(ads->filterflag & ADS_FILTER_NOGPENCIL)) {
-      tmp_items += animdata_filter_ds_gpencil(ac, &tmp_data, ads, gpd, filter_mode);
+    /* annotations */
+    if ((gpd) && ((ads->filterflag & ADS_FILTER_NOGPENCIL) == 0)) {
+      tmp_items += animdata_filter_ds_annotations(ac, &tmp_data, ads, gpd, filter_mode);
     }
 
     /* TODO: one day, when sequencer becomes its own datatype,
@@ -3073,6 +3092,7 @@ static size_t animdata_filter_dopesheet_movieclips(bAnimContext *ac,
 
 /* Helper for animdata_filter_dopesheet() - For checking if an object should be included or not */
 static bool animdata_filter_base_is_ok(bDopeSheet *ads,
+                                       ViewLayer *view_layer,
                                        Base *base,
                                        const eObjectMode object_mode,
                                        int filter_mode)
@@ -3142,9 +3162,12 @@ static bool animdata_filter_base_is_ok(bDopeSheet *ads,
       }
     }
     else {
-      /* only selected should be shown (ignore active) */
+      /* Only selected should be shown. */
       if (!(base->flag & BASE_SELECTED)) {
-        return false;
+        /* Include active object if filter option is enabled. */
+        if (!(ads->filterflag & ADS_FILTER_INCL_OBACT) || (BASACT(view_layer) != base)) {
+          return false;
+        }
       }
     }
   }
@@ -3184,7 +3207,7 @@ static Base **animdata_filter_ds_sorted_bases(bDopeSheet *ads,
 
   Base **sorted_bases = MEM_mallocN(sizeof(Base *) * tot_bases, "Dopesheet Usable Sorted Bases");
   LISTBASE_FOREACH (Base *, base, &view_layer->object_bases) {
-    if (animdata_filter_base_is_ok(ads, base, OB_MODE_OBJECT, filter_mode)) {
+    if (animdata_filter_base_is_ok(ads, view_layer, base, OB_MODE_OBJECT, filter_mode)) {
       sorted_bases[num_bases++] = base;
     }
   }
@@ -3280,7 +3303,7 @@ static size_t animdata_filter_dopesheet(bAnimContext *ac,
     Object *obact = OBACT(view_layer);
     const eObjectMode object_mode = obact ? obact->mode : OB_MODE_OBJECT;
     LISTBASE_FOREACH (Base *, base, &view_layer->object_bases) {
-      if (animdata_filter_base_is_ok(ads, base, object_mode, filter_mode)) {
+      if (animdata_filter_base_is_ok(ads, view_layer, base, object_mode, filter_mode)) {
         /* since we're still here, this object should be usable */
         items += animdata_filter_dopesheet_ob(ac, anim_data, ads, base, filter_mode);
       }

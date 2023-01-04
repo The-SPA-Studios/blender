@@ -587,7 +587,6 @@ static bool gpencil_weightpaint_brush_apply_to_layers(bContext *C, tGP_BrushWeig
     float diff_mat[4][4], bound_mat[4][4];
     BKE_gpencil_layer_transform_matrix_get(depsgraph, obact, gpl, diff_mat);
     copy_m4_m4(bound_mat, diff_mat);
-    mul_m4_m4m4(diff_mat, diff_mat, gpl->layer_invmat);
 
     /* Active Frame or MultiFrame? */
     if (gso->is_multiframe) {

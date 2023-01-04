@@ -184,17 +184,23 @@ static void gpencil_layer_cache_populate(bGPDlayer *gpl,
   const bool is_screenspace = (gpd->flag & GP_DATA_STROKE_KEEPTHICKNESS) != 0;
   const bool is_stroke_order_3d = (gpd->draw_mode == GP_DRAWMODE_3D);
 
-  float object_scale = mat4_to_scale(iter->ob->obmat);
   /* Negate thickness sign to tag that strokes are in screen space.
    * Convert to world units (by default, 1 meter = 2000 pixels). */
-  float thickness_scale = (is_screenspace) ? -1.0f : (gpd->pixfactor / 2000.0f);
+  const float thickness_world_scale = (is_screenspace) ? -1.0f : (gpd->pixfactor / 2000.0f);
+
+  float frame_matrix[4][4];
+  copy_m4_m4(frame_matrix, iter->ob->obmat);
+  mul_m4_m4_post(frame_matrix, gpl->layer_mat);
+  
+  const float thickness_scale = mat4_to_scale(frame_matrix);
 
   DRWShadingGroup *grp = iter->stroke_grp = DRW_shgroup_create_sub(iter->stroke_grp);
   DRW_shgroup_uniform_bool_copy(grp, "gpStrokeOrder3d", is_stroke_order_3d);
-  DRW_shgroup_uniform_float_copy(grp, "gpThicknessScale", object_scale);
+  DRW_shgroup_uniform_float_copy(grp, "gpThicknessScale", thickness_scale);
   DRW_shgroup_uniform_float_copy(grp, "gpThicknessOffset", (float)gpl->line_change);
-  DRW_shgroup_uniform_float_copy(grp, "gpThicknessWorldScale", thickness_scale);
+  DRW_shgroup_uniform_float_copy(grp, "gpThicknessWorldScale", thickness_world_scale);
   DRW_shgroup_uniform_vec4_copy(grp, "gpDepthPlane", iter->plane);
+  DRW_shgroup_uniform_mat4_copy(grp, "gpFrameMatrix", frame_matrix);
 }
 
 static void gpencil_stroke_cache_populate(bGPDlayer *UNUSED(gpl),

@@ -810,8 +810,7 @@ static void gpencil_save_selected_point(tGP_BrushVertexpaintData *gso,
 static bool gpencil_vertexpaint_select_stroke(tGP_BrushVertexpaintData *gso,
                                               bGPDstroke *gps,
                                               const char tool,
-                                              const float diff_mat[4][4],
-                                              const float bound_mat[4][4])
+                                              const float diff_mat[4][4])
 {
   GP_SpaceConversion *gsc = &gso->gsc;
   rcti *rect = &gso->brush_rect;
@@ -839,7 +838,7 @@ static bool gpencil_vertexpaint_select_stroke(tGP_BrushVertexpaintData *gso,
   }
 
   /* Check if the stroke collide with brush. */
-  if (!ED_gpencil_stroke_check_collision(gsc, gps, gso->mval, radius, bound_mat)) {
+  if (!ED_gpencil_stroke_check_collision(gsc, gps, gso->mval, radius, diff_mat)) {
     return false;
   }
 
@@ -983,9 +982,7 @@ static bool gpencil_vertexpaint_select_stroke(tGP_BrushVertexpaintData *gso,
 static bool gpencil_vertexpaint_brush_do_frame(bContext *C,
                                                tGP_BrushVertexpaintData *gso,
                                                bGPDlayer *gpl,
-                                               bGPDframe *gpf,
-                                               const float diff_mat[4][4],
-                                               const float bound_mat[4][4])
+                                               bGPDframe *gpf)
 {
   Object *ob = CTX_data_active_object(C);
   const char tool = ob->mode == OB_MODE_VERTEX_GPENCIL ? gso->brush->gpencil_vertex_tool :
@@ -1001,18 +998,9 @@ static bool gpencil_vertexpaint_brush_do_frame(bContext *C,
    * all selected points before apply the effect, because it could be
    * required to average data.
    *--------------------------------------------------------------------- */
-  LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
-    /* Skip strokes that are invalid for current view. */
-    if (ED_gpencil_stroke_can_use(C, gps) == false) {
-      continue;
-    }
-    /* Check if the color is editable. */
-    if (ED_gpencil_stroke_material_editable(ob, gpl, gps) == false) {
-      continue;
-    }
-
+  GP_EVALUATED_STROKES_BEGIN (gpstroke_iter, C, gpl, gps) {
     /* Check points below the brush. */
-    bool hit = gpencil_vertexpaint_select_stroke(gso, gps, tool, diff_mat, bound_mat);
+    bool hit = gpencil_vertexpaint_select_stroke(gso, gps, tool, gpstroke_iter.diff_mat);
 
     /* If stroke was hit and has an editcurve the curve needs an update. */
     bGPDstroke *gps_active = (gps->runtime.gps_orig) ? gps->runtime.gps_orig : gps;
@@ -1020,6 +1008,7 @@ static bool gpencil_vertexpaint_brush_do_frame(bContext *C,
       gps_active->editcurve->flag |= GP_CURVE_NEEDS_STROKE_UPDATE;
     }
   }
+  GP_EVALUATED_STROKES_END(gpstroke_iter);
 
   /* For Average tool, need calculate the average resulting color from all colors
    * under the brush. */
@@ -1121,7 +1110,6 @@ static bool gpencil_vertexpaint_brush_apply_to_layers(bContext *C, tGP_BrushVert
     float diff_mat[4][4], bound_mat[4][4];
     BKE_gpencil_layer_transform_matrix_get(depsgraph, obact, gpl, diff_mat);
     copy_m4_m4(bound_mat, diff_mat);
-    mul_m4_m4m4(diff_mat, diff_mat, gpl->layer_invmat);
 
     /* Active Frame or MultiFrame? */
     if (gso->is_multiframe) {
@@ -1148,7 +1136,7 @@ static bool gpencil_vertexpaint_brush_apply_to_layers(bContext *C, tGP_BrushVert
           }
 
           /* affect strokes in this frame */
-          changed |= gpencil_vertexpaint_brush_do_frame(C, gso, gpl, gpf, diff_mat, bound_mat);
+          changed |= gpencil_vertexpaint_brush_do_frame(C, gso, gpl, gpf);
         }
       }
     }
@@ -1156,8 +1144,7 @@ static bool gpencil_vertexpaint_brush_apply_to_layers(bContext *C, tGP_BrushVert
       /* Apply to active frame's strokes */
       if (gpl->actframe != NULL) {
         gso->mf_falloff = 1.0f;
-        changed |= gpencil_vertexpaint_brush_do_frame(
-            C, gso, gpl, gpl->actframe, diff_mat, bound_mat);
+        changed |= gpencil_vertexpaint_brush_do_frame(C, gso, gpl, gpl->actframe);
       }
     }
   }

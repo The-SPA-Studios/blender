@@ -33,6 +33,7 @@
 #include "BKE_fcurve.h"
 #include "BKE_global.h"
 #include "BKE_gpencil.h"
+#include "BKE_gpencil_update_cache.h"
 #include "BKE_key.h"
 #include "BKE_nla.h"
 #include "BKE_report.h"
@@ -921,8 +922,13 @@ static bool duplicate_action_keys(bAnimContext *ac)
       changed |= duplicate_fcurve_keys((FCurve *)ale->key_data);
     }
     else if (ale->type == ANIMTYPE_GPLAYER) {
-      ED_gpencil_layer_frames_duplicate((bGPDlayer *)ale->data);
-      changed |= ED_gpencil_layer_frame_select_check((bGPDlayer *)ale->data);
+      bGPdata *gpd = (bGPdata *)ale->id;
+      bGPDlayer *gpl = (bGPDlayer *)ale->data;
+      ED_gpencil_layer_frames_duplicate(gpl);
+      changed |= ED_gpencil_layer_frame_select_check(gpl);
+      if (changed) {
+        BKE_gpencil_tag_full_update(gpd, gpl, NULL, NULL);
+      }
     }
     else if (ale->type == ANIMTYPE_MASKLAYER) {
       ED_masklayer_frames_duplicate((MaskLayer *)ale->data);

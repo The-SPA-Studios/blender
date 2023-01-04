@@ -114,10 +114,13 @@ static void blender_version_init(void)
 
   BLI_snprintf(blender_version_string,
                ARRAY_SIZE(blender_version_string),
-               "%d.%01d.%d%s",
+               "%d.%01d.%d (spa-studios-v%d.%d.%d%s)",
                BLENDER_VERSION / 100,
                BLENDER_VERSION % 100,
                BLENDER_VERSION_PATCH,
+               BLENDER_SPA_STUDIO_VERSION / 10,
+               BLENDER_SPA_STUDIO_VERSION % 10,
+               BLENDER_SPA_STUDIO_VERSION_PATCH,
                version_cycle);
 }
 

@@ -148,6 +148,7 @@ set(SRC
   intern/geometry_set_instances.cc
   intern/gpencil.c
   intern/gpencil_curve.c
+  intern/gpencil_frame_cache.cc
   intern/gpencil_geom.cc
   intern/gpencil_modifier.c
   intern/gpencil_update_cache.c
@@ -388,6 +389,7 @@ set(SRC
   BKE_global.h
   BKE_gpencil.h
   BKE_gpencil_curve.h
+  BKE_gpencil_frame_cache.hh
   BKE_gpencil_geom.h
   BKE_gpencil_modifier.h
   BKE_gpencil_update_cache.h

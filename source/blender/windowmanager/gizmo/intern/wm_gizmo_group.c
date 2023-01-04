@@ -454,6 +454,11 @@ static void gizmo_tweak_finish(bContext *C, wmOperator *op, const bool cancel, b
   if (mtweak->gz_modal->type->exit) {
     mtweak->gz_modal->type->exit(C, mtweak->gz_modal, cancel);
   }
+  if (mtweak->gz_modal->parent_gzgroup->type->exit_cleanup) {
+    mtweak->gz_modal->parent_gzgroup->type->exit_cleanup(
+        C, mtweak->gz_modal->parent_gzgroup, mtweak->gz_modal, cancel);
+  }
+
   if (clear_modal) {
     /* The gizmo may have been removed. */
     if ((BLI_findindex(&mtweak->gzmap->groups, mtweak->gzgroup) != -1) &&

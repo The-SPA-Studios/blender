@@ -54,7 +54,7 @@ static int strip_modifier_add_exec(bContext *C, wmOperator *op)
   SEQ_modifier_new(seq, NULL, type);
 
   SEQ_relations_invalidate_cache_preprocessed(scene, seq);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -105,7 +105,7 @@ static int strip_modifier_remove_exec(bContext *C, wmOperator *op)
   SEQ_modifier_free(smd);
 
   SEQ_relations_invalidate_cache_preprocessed(scene, seq);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -168,7 +168,7 @@ static int strip_modifier_move_exec(bContext *C, wmOperator *op)
   }
 
   SEQ_relations_invalidate_cache_preprocessed(scene, seq);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -244,7 +244,7 @@ static int strip_modifier_copy_exec(bContext *C, wmOperator *op)
   }
 
   SEQ_relations_invalidate_cache_preprocessed(scene, seq);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }

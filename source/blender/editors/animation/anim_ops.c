@@ -153,7 +153,7 @@ static void change_frame_apply(bContext *C, wmOperator *op)
 
   /* do updates */
   DEG_id_tag_update(&scene->id, ID_RECALC_FRAME_CHANGE);
-  WM_event_add_notifier(C, NC_SCENE | ND_FRAME, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_FRAME, NULL);
 }
 
 /* ---- */
@@ -219,8 +219,7 @@ static void change_frame_seq_preview_end(bContext *C)
   }
 
   if (notify) {
-    Scene *scene = CTX_data_scene(C);
-    WM_event_add_notifier(C, NC_SCENE | ND_FRAME, scene);
+    WM_event_add_notifier(C, NC_SCENE | ND_FRAME, NULL);
   }
 }
 

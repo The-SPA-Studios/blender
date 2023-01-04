@@ -40,6 +40,7 @@
 #include "BKE_gpencil.h"
 #include "BKE_gpencil_curve.h"
 #include "BKE_gpencil_geom.h"
+#include "BKE_gpencil_update_cache.h"
 #include "BKE_layer.h"
 #include "BKE_lib_id.h"
 #include "BKE_library.h"
@@ -171,11 +172,6 @@ static int gpencil_editmode_toggle_exec(bContext *C, wmOperator *op)
 
   /* Just toggle editmode flag... */
   gpd->flag ^= GP_DATA_STROKE_EDITMODE;
-  /* recalculate parent matrix */
-  if (gpd->flag & GP_DATA_STROKE_EDITMODE) {
-    Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
-    ED_gpencil_reset_layers_parent(depsgraph, ob, gpd);
-  }
   /* set mode */
   if (gpd->flag & GP_DATA_STROKE_EDITMODE) {
     mode = OB_MODE_EDIT_GPENCIL;
@@ -2248,7 +2244,8 @@ static int gpencil_delete_selected_strokes(bContext *C)
             BLI_remlink(&gpf->strokes, gps);
             /* free stroke memory arrays, then stroke itself */
             BKE_gpencil_free_stroke(gps);
-
+            /* Tag frame for full update. */
+            BKE_gpencil_tag_full_update(gpd, gpl, gpf, NULL);
             changed = true;
           }
         }
@@ -2671,7 +2668,8 @@ static int gpencil_delete_selected_points(bContext *C)
               BKE_gpencil_stroke_delete_tagged_points(
                   gpd, gpf, gps, gps->next, GP_SPOINT_SELECT, false, false, 0);
             }
-
+            /* Tag frame for full update as this operation may change the number of strokes. */
+            BKE_gpencil_tag_full_update(gpd, gpl, gpf, NULL);
             changed = true;
           }
         }
@@ -4489,7 +4487,8 @@ void GPENCIL_OT_stroke_sample(wmOperatorType *ot)
 
   /* properties */
   prop = RNA_def_float(ot->srna, "length", 0.1f, 0.0f, 100.0f, "Length", "", 0.0f, 100.0f);
-  prop = RNA_def_float(ot->srna, "sharp_threshold", 0.1f, 0.0f, M_PI, "Sharp Threshold", "", 0.0f, M_PI);
+  prop = RNA_def_float(
+      ot->srna, "sharp_threshold", 0.1f, 0.0f, M_PI, "Sharp Threshold", "", 0.0f, M_PI);
   /* avoid re-using last var */
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
@@ -5621,6 +5620,343 @@ void GPENCIL_OT_stroke_normalize(wmOperatorType *ot)
       ot->srna, "mode", prop_gpencil_normalize_modes, 0, "Mode", "Attribute to be normalized");
   RNA_def_float(ot->srna, "factor", 1.0f, 0.0f, 1.0f, "Factor", "", 0.0f, 1.0f);
   RNA_def_int(ot->srna, "value", 10, 0, 1000, "Value", "Value", 0, 1000);
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Pick Frame Offset Operator
+ * \{ */
+
+static bool gpencil_3d_point_to_screen_space(ARegion *region,
+                                             const float diff_mat[4][4],
+                                             const float co[3],
+                                             int r_co[2])
+{
+  float parent_co[3];
+  mul_v3_m4v3(parent_co, diff_mat, co);
+  int screen_co[2];
+  if (ED_view3d_project_int_global(
+          region, parent_co, screen_co, V3D_PROJ_RET_CLIP_BB | V3D_PROJ_RET_CLIP_WIN) ==
+      V3D_PROJ_RET_OK) {
+    if (!ELEM(V2D_IS_CLIPPED, screen_co[0], screen_co[1])) {
+      copy_v2_v2_int(r_co, screen_co);
+      return true;
+    }
+  }
+  r_co[0] = V2D_IS_CLIPPED;
+  r_co[1] = V2D_IS_CLIPPED;
+  return false;
+}
+
+typedef struct tGPPickFrameOffsetIter {
+  Depsgraph *depsgraph;
+  ARegion *region;
+  Object *ob;
+  int mval[2];
+  bGPDframe *hit_frame;
+  int hit_distance;
+  int radius_squared;
+  int current_frame_offset;
+  bool is_onion_world;
+  bool use_frame_offset;
+} tGPPickFrameOffsetIter;
+
+static bool gpencil_pick_frame_offset_poll(bContext *C)
+{
+  Object *ob = CTX_data_active_object(C);
+  if ((ob == NULL) || (ob->type != OB_GPENCIL)) {
+    return false;
+  }
+  bGPdata *gpd = (bGPdata *)ob->data;
+  if (gpd == NULL) {
+    return false;
+  }
+
+  bGPDlayer *gpl = BKE_gpencil_layer_active_get(gpd);
+
+  return ((gpl != NULL) && (ob->mode == OB_MODE_PAINT_GPENCIL));
+}
+
+static void gpencil_pick_frame_offset_frame_cb(bGPDlayer *gpl,
+                                               bGPDframe *gpf,
+                                               bGPDstroke *UNUSED(gps_),
+                                               void *thunk)
+{
+  tGPPickFrameOffsetIter *data_iter = (tGPPickFrameOffsetIter *)thunk;
+
+  if (gpf == NULL || gpf->framenum == data_iter->current_frame_offset) {
+    return;
+  }
+
+  bGPDframe *gpf_orig = gpf->runtime.gpf_orig ? gpf->runtime.gpf_orig : gpf;
+  float matrix[4][4];
+  if (data_iter->is_onion_world && gpf_orig && gpl->actframe != gpf &&
+      gpf_orig->runtime.transform_valid) {
+    copy_m4_m4(matrix, gpf_orig->runtime.transform);
+  }
+  else {
+    BKE_gpencil_layer_transform_matrix_get(data_iter->depsgraph, data_iter->ob, gpl, matrix);
+  }
+  if (data_iter->use_frame_offset) {
+    mul_m4_m4_post(matrix, gpf->transformation_mat);
+  }
+
+  int xy[2];
+  LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
+    for (int i = 0; i < gps->totpoints; i++) {
+      bGPDspoint *pt = &gps->points[i];
+      gpencil_3d_point_to_screen_space(data_iter->region, matrix, &pt->x, xy);
+      if (!ELEM(V2D_IS_CLIPPED, xy[0], xy[1])) {
+        const int pt_distance = len_manhattan_v2v2_int(data_iter->mval, xy);
+        if (pt_distance <= data_iter->radius_squared && pt_distance < data_iter->hit_distance) {
+          data_iter->hit_frame = gpf;
+          data_iter->hit_distance = pt_distance;
+        }
+      }
+    }
+  }
+}
+
+static int gpencil_pick_frame_offset_exec(bContext *C, wmOperator *op)
+{
+  Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
+  ARegion *region = CTX_wm_region(C);
+  ViewLayer *view_layer = CTX_data_view_layer(C);
+  Scene *scene = CTX_data_scene(C);
+  ToolSettings *ts = scene->toolsettings;
+  Object *obact = CTX_data_active_object(C);
+  Object *ob_eval = (Object *)DEG_get_evaluated_id(depsgraph, &obact->id);
+  bGPdata *gpd = (bGPdata *)obact->data;
+
+  int mval[2] = {0};
+  RNA_int_get_array(op->ptr, "location", mval);
+
+  const float radius = 0.4f * U.widget_unit;
+  const int radius_squared = (int)(radius * radius);
+  tGPPickFrameOffsetIter data_iter = {
+      .depsgraph = depsgraph,
+      .region = region,
+      .ob = obact,
+      .mval = {mval[0], mval[1]},
+      .hit_frame = NULL,
+      .hit_distance = radius_squared,
+      .radius_squared = radius_squared,
+      .current_frame_offset = ts->gp_frame_offset.custom_frame,
+      .is_onion_world = (gpd->onion_space == GP_ONION_SPACE_WORLD),
+      .use_frame_offset = (ts->gpencil_flags & GP_TOOL_FLAG_USE_FRAME_OFFSET_MATRIX)};
+
+  BKE_gpencil_visible_stroke_advanced_iter(view_layer,
+                                           ob_eval,
+                                           gpencil_pick_frame_offset_frame_cb,
+                                           NULL,
+                                           &data_iter,
+                                           true,
+                                           scene->r.cfra);
+
+  if (data_iter.hit_frame) {
+    PointerRNA gpsettings_ptr;
+    RNA_pointer_create(
+        &scene->id, &RNA_GPencilFrameOffsetSettings, &ts->gp_frame_offset, &gpsettings_ptr);
+    RNA_int_set(&gpsettings_ptr, "frame", data_iter.hit_frame->framenum);
+    RNA_boolean_set(&gpsettings_ptr, "use_current_frame", false);
+
+    WM_event_add_notifier(C, NC_SCENE | ND_TOOLSETTINGS, NULL);
+    /* TODO: find a better way to cause the gizmo group to refresh. */
+    WM_event_add_notifier(C, NC_SCENE | ND_FRAME, NULL);
+  }
+
+  return OPERATOR_FINISHED;
+}
+
+static int gpencil_pick_frame_offset_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+{
+  RNA_int_set_array(op->ptr, "location", event->mval);
+  return gpencil_pick_frame_offset_exec(C, op);
+}
+
+void GPENCIL_OT_pick_frame_offset(wmOperatorType *ot)
+{
+  PropertyRNA *prop;
+
+  /* identifiers */
+  ot->name = "Pick Frame Offset";
+  ot->description =
+      "Click select strokes in the viewport to pick the frame for the frame offset tool";
+  ot->idname = "GPENCIL_OT_pick_frame_offset";
+
+  /* callbacks */
+  ot->invoke = gpencil_pick_frame_offset_invoke;
+  ot->exec = gpencil_pick_frame_offset_exec;
+  ot->poll = gpencil_pick_frame_offset_poll;
+
+  /* flag */
+  ot->flag = OPTYPE_UNDO;
+
+  /* properties */
+  prop = RNA_def_int_vector(ot->srna,
+                            "location",
+                            2,
+                            NULL,
+                            INT_MIN,
+                            INT_MAX,
+                            "Location",
+                            "Mouse location",
+                            INT_MIN,
+                            INT_MAX);
+  RNA_def_property_flag(prop, PROP_HIDDEN);
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Pick Active Layer Operator
+ * \{ */
+
+typedef struct tGPPickActiveLayerIter {
+  Object *ob;
+  ARegion *region;
+
+  int mval[2];
+
+  bGPDlayer *hit_layer;
+  int hit_distance;
+  int radius_squared;
+} tGPPickActiveLayerIter;
+
+static bool gpencil_pick_active_layer_poll(bContext *C)
+{
+  Object *ob = CTX_data_active_object(C);
+  if ((ob == NULL) || (ob->type != OB_GPENCIL)) {
+    return false;
+  }
+  bGPdata *gpd = (bGPdata *)ob->data;
+  if (gpd == NULL) {
+    return false;
+  }
+
+  return (ob->mode & OB_MODE_ALL_PAINT_GPENCIL) != 0;
+}
+
+static void gpencil_pick_active_layer_stroke_cb(bGPDlayer *gpl,
+                                                bGPDframe *UNUSED(gpf),
+                                                bGPDstroke *gps,
+                                                void *thunk)
+{
+  tGPPickActiveLayerIter *data_iter = (tGPPickActiveLayerIter *)thunk;
+
+  /* Skip over current active layer. */
+  if ((gpl->flag & GP_LAYER_ACTIVE) != 0) {
+    return;
+  }
+
+  for (int i = 0; i < gps->totpoints; i++) {
+    bGPDspoint *pt = &gps->points[i];
+    int xy[2];
+    gpencil_3d_point_to_screen_space(data_iter->region, data_iter->ob->obmat, &pt->x, xy);
+    if (!ELEM(V2D_IS_CLIPPED, xy[0], xy[1])) {
+      const int pt_distance = len_manhattan_v2v2_int(data_iter->mval, xy);
+      if (pt_distance <= data_iter->radius_squared && pt_distance < data_iter->hit_distance) {
+        data_iter->hit_layer = gpl;
+        data_iter->hit_distance = pt_distance;
+      }
+    }
+  }
+}
+
+static int gpencil_pick_active_layer_exec(bContext *C, wmOperator *op)
+{
+  Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
+  ViewLayer *view_layer = CTX_data_view_layer(C);
+  Scene *scene = CTX_data_scene(C);
+  ARegion *region = CTX_wm_region(C);
+  Object *obact = CTX_data_active_object(C);
+  Object *ob_eval = (Object *)DEG_get_evaluated_id(depsgraph, &obact->id);
+  bGPdata *gpd = ED_gpencil_data_get_active(C);
+
+  int mval[2] = {0};
+  RNA_int_get_array(op->ptr, "location", mval);
+
+  const float radius = 0.4f * U.widget_unit;
+  const int radius_squared = (int)(radius * radius);
+  tGPPickActiveLayerIter data_iter = {.ob = obact,
+                                      .region = region,
+                                      .mval = {mval[0], mval[1]},
+                                      .hit_layer = NULL,
+                                      .hit_distance = radius_squared,
+                                      .radius_squared = radius_squared};
+
+  BKE_gpencil_visible_stroke_advanced_iter(view_layer,
+                                           ob_eval,
+                                           NULL,
+                                           gpencil_pick_active_layer_stroke_cb,
+                                           &data_iter,
+                                           true,
+                                           scene->r.cfra);
+
+  if (data_iter.hit_layer != NULL) {
+    bGPDlayer *gpl_active = (data_iter.hit_layer->runtime.gpl_orig != NULL) ?
+                                data_iter.hit_layer->runtime.gpl_orig :
+                                data_iter.hit_layer;
+
+    /* Deselect all layers. */
+    LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
+      gpl->flag &= ~GP_LAYER_SELECT;
+    }
+
+    /* Select the hit layer. */
+    gpl_active->flag |= GP_LAYER_SELECT;
+
+    /* Set the active layer. */
+    BKE_gpencil_layer_active_set(gpd, gpl_active);
+
+    LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
+      BKE_gpencil_tag_light_update(gpd, gpl, NULL, NULL);
+    }
+    DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
+    WM_event_add_notifier(C, NC_GPENCIL | ND_DATA | NA_EDITED, NULL);
+  }
+
+  return OPERATOR_FINISHED;
+}
+
+static int gpencil_pick_active_layer_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+{
+  RNA_int_set_array(op->ptr, "location", event->mval);
+  return gpencil_pick_active_layer_exec(C, op);
+}
+
+void GPENCIL_OT_pick_active_layer(wmOperatorType *ot)
+{
+  PropertyRNA *prop;
+
+  /* identifiers */
+  ot->name = "Pick Active Layer";
+  ot->description =
+      "Click select strokes in the viewport to change the active layer to the layer that the "
+      "picked stroke is on";
+  ot->idname = "GPENCIL_OT_pick_active_layer";
+
+  /* callbacks */
+  ot->invoke = gpencil_pick_active_layer_invoke;
+  ot->exec = gpencil_pick_active_layer_exec;
+  ot->poll = gpencil_pick_active_layer_poll;
+
+  /* flag */
+  ot->flag = OPTYPE_UNDO;
+
+  /* properties */
+  prop = RNA_def_int_vector(ot->srna,
+                            "location",
+                            2,
+                            NULL,
+                            INT_MIN,
+                            INT_MAX,
+                            "Location",
+                            "Mouse location",
+                            INT_MIN,
+                            INT_MAX);
+  RNA_def_property_flag(prop, PROP_HIDDEN);
 }
 
 /** \} */

@@ -1161,6 +1161,15 @@ typedef struct GP_Interpolate_Settings {
   struct CurveMapping *custom_ipo;
 } GP_Interpolate_Settings;
 
+/* Settings for GP Frame Offset Tool. */
+typedef struct GP_FrameOffset_Settings {
+  /* If true, use the current frame in the scene. */
+  char use_current_frame;
+  char _pad[3];
+  /* Custom frame to use the widget on. Only used when use_current_frame is false. */
+  int custom_frame;
+} GP_FrameOffset_Settings;
+
 /** #GP_Interpolate_Settings.flag */
 typedef enum eGP_Interpolate_SettingsFlag {
   /* apply interpolation to all layers */
@@ -1461,6 +1470,9 @@ typedef struct ToolSettings {
 
   /* Grease Pencil Interpolation Tool(s) */
   struct GP_Interpolate_Settings gp_interpolate;
+
+  /* Grease Pencil Frame Offset Tool Settings. */
+  struct GP_FrameOffset_Settings gp_frame_offset;
 
   /* Image Paint (8 bytes aligned please!) */
   struct ImagePaintSettings imapaint;
@@ -2409,6 +2421,10 @@ typedef enum eGPencil_Flags {
   GP_TOOL_FLAG_CREATE_WEIGHTS = (1 << 4),
   /* Automerge with last stroke */
   GP_TOOL_FLAG_AUTOMERGE_STROKE = (1 << 5),
+  /* Use the gpf.transformation_mat. */
+  GP_TOOL_FLAG_USE_FRAME_OFFSET_MATRIX = (1 << 6),
+  /* Tool only affects the active layer. */
+  GP_TOOL_FLAG_ONLY_ACTIVE_LAYER = (1 << 7),
 } eGPencil_Flags;
 
 /** #Scene.r.simplify_gpencil */

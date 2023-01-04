@@ -20,6 +20,7 @@ extern "C" {
 #define BLENDER_VERSION 303
 /* Blender patch version for bugfix releases. */
 #define BLENDER_VERSION_PATCH 2
+
 /** Blender release cycle stage: alpha/beta/rc/release. */
 #define BLENDER_VERSION_CYCLE release
 
@@ -32,6 +33,10 @@ extern "C" {
  * was written with too new a version. */
 #define BLENDER_FILE_MIN_VERSION 300
 #define BLENDER_FILE_MIN_SUBVERSION 43
+
+/* Blender SPA studio version. */
+#define BLENDER_SPA_STUDIO_VERSION 24
+#define BLENDER_SPA_STUDIO_VERSION_PATCH 1
 
 /** User readable version string. */
 const char *BKE_blender_version_string(void);

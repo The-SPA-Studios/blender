@@ -37,6 +37,16 @@ def paths():
     # if folder addons_contrib/ exists, scripts in there will be loaded too
     addon_paths += _bpy.utils.script_paths(subdir="addons_contrib")
 
+    # EXTRA ADDONS
+    # https://devtalk.blender.org/t/blender-user-scripts-and-multiple-paths/10395/15
+    import os
+    extra_env = os.environ.get("BLENDER_EXTRA_ADDONS")
+    if extra_env:
+        extra_paths = extra_env.split(os.pathsep)
+        for p in extra_paths:
+            if os.path.isdir(p):
+                addon_paths.append(os.path.normpath(p))
+
     return addon_paths
 
 

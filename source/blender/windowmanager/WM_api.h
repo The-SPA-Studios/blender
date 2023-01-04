@@ -1371,6 +1371,7 @@ enum {
   WM_JOB_TYPE_LINEART,
   WM_JOB_TYPE_SEQ_DRAW_THUMBNAIL,
   WM_JOB_TYPE_SEQ_DRAG_DROP_PREVIEW,
+  WM_JOB_TYPE_GPENCIL_FRAME_TRANSFORMATION_CACHE,
   /* add as needed, bake, seq proxy build
    * if having hard coded values is a problem */
 };

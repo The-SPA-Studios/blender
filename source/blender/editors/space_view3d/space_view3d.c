@@ -965,6 +965,8 @@ static void view3d_widgets(void)
   WM_gizmogrouptype_append_and_link(gzmap_type, VIEW3D_GGT_armature_spline);
 #endif
 
+  WM_gizmogrouptype_append(VIEW3D_GGT_gpencil_xform_box);
+  WM_gizmogrouptype_append(VIEW3D_GGT_gpencil_frame_offset);
   WM_gizmogrouptype_append(VIEW3D_GGT_xform_gizmo);
   WM_gizmogrouptype_append(VIEW3D_GGT_xform_cage);
   WM_gizmogrouptype_append(VIEW3D_GGT_xform_shear);
@@ -1297,6 +1299,7 @@ static void view3d_main_region_listener(const wmRegionListenerParams *params)
       break;
     case NC_GPENCIL:
       if (wmn->data == ND_DATA || ELEM(wmn->action, NA_EDITED, NA_SELECTED)) {
+        WM_gizmomap_tag_refresh(gzmap);
         ED_region_tag_redraw(region);
       }
       break;

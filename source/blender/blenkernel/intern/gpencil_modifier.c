@@ -685,9 +685,16 @@ static void copy_frame_to_eval_cb(bGPDlayer *gpl,
 
 static void gpencil_copy_visible_frames_to_eval(Depsgraph *depsgraph, Scene *scene, Object *ob)
 {
-  /* Remap layers active frame with time modifiers applied. */
+  /* Remap layers active frames with time modifiers applied and restore their strokes
+   * from original data. */
   bGPdata *gpd_eval = ob->data;
   LISTBASE_FOREACH (bGPDlayer *, gpl_eval, &gpd_eval->layers) {
+    /* If the layer is not visible and object has no modifiers, it is safe to skip it.
+     * Otherwise, even when hidden, gpencil modifier may generate extra geometry on active frame,
+     * which therefore needs to be restored from original. */
+    if ((gpl_eval->flag & GP_LAYER_HIDE) && BLI_listbase_is_empty(&ob->greasepencil_modifiers)) {
+      continue;
+    }
     bGPDframe *gpf_eval = gpl_eval->actframe;
     int remap_cfra = gpencil_remap_time_get(depsgraph, scene, ob, gpl_eval);
     if (gpf_eval == NULL || gpf_eval->framenum != remap_cfra) {
@@ -711,29 +718,6 @@ void BKE_gpencil_prepare_eval_data(Depsgraph *depsgraph, Scene *scene, Object *o
   Object *ob_orig = (Object *)DEG_get_original_id(&ob->id);
   bGPdata *gpd_orig = (bGPdata *)ob_orig->data;
 
-  /* Need check if some layer is parented or transformed. */
-  bool do_parent = false;
-  bool do_transform = false;
-  LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd_orig->layers) {
-    if (gpl->parent != NULL) {
-      do_parent = true;
-      break;
-    }
-
-    /* Only do layer transformations for non-zero or animated transforms. */
-    bool transformed = ((!is_zero_v3(gpl->location)) || (!is_zero_v3(gpl->rotation)) ||
-                        (!is_one_v3(gpl->scale)));
-    float tmp_mat[4][4];
-    loc_eul_size_to_mat4(tmp_mat, gpl->location, gpl->rotation, gpl->scale);
-    transformed |= !equals_m4m4(gpl->layer_mat, tmp_mat);
-    if (transformed) {
-      do_transform = true;
-      break;
-    }
-  }
-
-  DEG_debug_print_eval(depsgraph, __func__, gpd_eval->id.name, gpd_eval);
-
   /* Delete any previously created runtime copy. */
   if (ob->runtime.gpd_eval != NULL) {
     /* Make sure to clear the pointer in case the runtime eval data points to the same data block.
@@ -752,24 +736,23 @@ void BKE_gpencil_prepare_eval_data(Depsgraph *depsgraph, Scene *scene, Object *o
   const bool do_modifiers = (bool)((!is_multiedit) && (!is_curve_edit) &&
                                    (ob_orig->greasepencil_modifiers.first != NULL) &&
                                    (!GPENCIL_SIMPLIFY_MODIF(scene)));
-  if ((!do_modifiers) && (!do_parent) && (!do_transform)) {
-    BLI_assert(ob->data != NULL);
-    return;
-  }
+  const bool is_multiuser = gpd_orig->id.us > 1;
 
   /* If datablock has only one user, we can update its eval data directly.
    * Otherwise, we need to have distinct copies for each instance, since applied transformations
    * may differ. */
-  if (gpd_orig->id.us > 1) {
+  if (is_multiuser) {
     /* Copy of the original datablock's structure (layers and empty frames). */
     ob->runtime.gpd_eval = gpencil_copy_structure_for_eval(gpd_orig);
     /* Overwrite ob->data with gpd_eval here. */
     gpencil_assign_object_eval(ob);
   }
 
+  if (do_modifiers || is_multiuser) {
+    /* Only copy strokes from visible frames to evaluated data. */
+    gpencil_copy_visible_frames_to_eval(depsgraph, scene, ob);
+  }
   BLI_assert(ob->data != NULL);
-  /* Only copy strokes from visible frames to evaluated data. */
-  gpencil_copy_visible_frames_to_eval(depsgraph, scene, ob);
 }
 
 void BKE_gpencil_modifiers_calc(Depsgraph *depsgraph, Scene *scene, Object *ob)

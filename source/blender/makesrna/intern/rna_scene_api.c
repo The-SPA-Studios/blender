@@ -43,7 +43,7 @@
 #    include "BPY_extern.h"
 #  endif
 
-static void rna_Scene_frame_set(Scene *scene, Main *bmain, int frame, float subframe)
+static void rna_Scene_frame_set(Scene *scene, Main *bmain, int frame, float subframe, bool notify)
 {
   double cfra = (double)frame + (double)subframe;
 
@@ -77,8 +77,10 @@ static void rna_Scene_frame_set(Scene *scene, Main *bmain, int frame, float subf
      * BKE_scene_graph_update_for_newframe which will lose any un-keyed changes T24690. */
     // WM_main_add_notifier(NC_SCENE|ND_FRAME, scene);
 
-    /* instead just redraw the views */
-    WM_main_add_notifier(NC_WINDOW, NULL);
+    /* instead just redraw the views if notify is set */
+    if (notify) {
+      WM_main_add_notifier(NC_WINDOW, NULL);
+    }
   }
 }
 
@@ -260,6 +262,7 @@ void RNA_api_scene(StructRNA *srna)
   RNA_def_parameter_flags(parm, 0, PARM_REQUIRED);
   RNA_def_float(
       func, "subframe", 0.0, 0.0, 1.0, "", "Subframe time, between 0.0 and 1.0", 0.0, 1.0);
+  RNA_def_boolean(func, "notify", 1, "Notify", "Add a notifier for this update");
   RNA_def_function_flag(func, FUNC_USE_MAIN);
 
   func = RNA_def_function(srna, "uvedit_aspect", "rna_Scene_uvedit_aspect");

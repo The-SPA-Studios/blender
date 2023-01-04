@@ -2596,6 +2596,7 @@ static void lib_link_workspace_layout_restore(struct IDNameLib_Map *id_map,
            * so assume that here we're doing for undo only...
            */
           sseq->gpd = restore_pointer_by_name(id_map, (ID *)sseq->gpd, USER_REAL);
+          sseq->scene_override = restore_pointer_by_name(id_map, (ID *)sseq->scene_override, USER_REAL);
         }
         else if (sl->spacetype == SPACE_NLA) {
           SpaceNla *snla = (SpaceNla *)sl;

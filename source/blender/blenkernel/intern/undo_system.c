@@ -56,6 +56,7 @@ const UndoType *BKE_UNDOSYS_TYPE_PAINTCURVE = NULL;
 const UndoType *BKE_UNDOSYS_TYPE_PARTICLE = NULL;
 const UndoType *BKE_UNDOSYS_TYPE_SCULPT = NULL;
 const UndoType *BKE_UNDOSYS_TYPE_TEXT = NULL;
+const UndoType *BKE_UNDOSYS_TYPE_GPENCIL = NULL;
 
 static ListBase g_undo_types = {NULL, NULL};
 

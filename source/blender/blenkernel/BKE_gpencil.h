@@ -33,6 +33,7 @@ struct bGPDlayer;
 struct bGPDlayer_Mask;
 struct bGPDstroke;
 struct bGPdata;
+struct GPencilUpdateCache;
 
 #define GPENCIL_SIMPLIFY(scene) \
   ((scene->r.mode & R_SIMPLIFY) && (scene->r.simplify_gpencil & SIMPLIFY_GPENCIL_ENABLE))
@@ -207,12 +208,13 @@ struct bGPDstroke *BKE_gpencil_stroke_duplicate(struct bGPDstroke *gps_src,
 
 /**
  * Make a copy of a given gpencil data-block.
- *
- * XXX: Should this be deprecated?
+ * \param bmain: Main structure. Can be NULL which will make a localized copy of the data-block
+ * outside of bmain.
+ * \param gpd: The grease pencil data-block to duplicate.
  */
-struct bGPdata *BKE_gpencil_data_duplicate(struct Main *bmain,
-                                           const struct bGPdata *gpd,
-                                           bool internal_copy);
+void BKE_gpencil_data_duplicate(struct Main *bmain,
+                                const struct bGPdata *gpd,
+                                struct bGPdata **gpd_dst);
 
 /**
  * Delete the last stroke of the given frame.
@@ -363,6 +365,7 @@ struct bGPDframe *BKE_gpencil_layer_frame_get(struct bGPDlayer *gpl,
  * \return Pointer to frame
  */
 struct bGPDframe *BKE_gpencil_layer_frame_find(struct bGPDlayer *gpl, int cframe);
+struct bGPDframe *BKE_gpencil_layer_frame_find_prev(struct bGPDlayer *gpl, int cframe);
 /**
  * Delete the given frame from a layer.
  * \param gpl: Grease pencil layer
@@ -704,6 +707,18 @@ void BKE_gpencil_data_update_orig_pointers(const struct bGPdata *gpd_orig,
  * \param gpl: Grease pencil layer
  * \param diff_mat: Result parent matrix
  */
+void BKE_gpencil_layer_parent_matrix_get(const struct Depsgraph *depsgraph,
+                                         struct Object *obact,
+                                         struct bGPDlayer *gpl,
+                                         float diff_mat[4][4]);
+
+/**
+ * Get layer matrix, including layer parenting and layer transformation.
+ * \param depsgraph: Depsgraph
+ * \param obact: Grease pencil object
+ * \param gpl: Grease pencil layer
+ * \param diff_mat: Result parented layer matrix
+ */
 void BKE_gpencil_layer_transform_matrix_get(const struct Depsgraph *depsgraph,
                                             struct Object *obact,
                                             struct bGPDlayer *gpl,
@@ -730,6 +745,25 @@ bool BKE_gpencil_can_avoid_full_copy_on_write(const struct Depsgraph *depsgraph,
                                               struct bGPdata *gpd);
 
 void BKE_gpencil_update_on_write(struct bGPdata *gpd_orig, struct bGPdata *gpd_eval);
+
+void BKE_gpencil_update_frames_transformation_cache_ex(struct Main *bmain,
+                                                       struct Scene *scene,
+                                                       struct ViewLayer *view_layer,
+                                                       struct Object *obact,
+                                                       int start_frame,
+                                                       int end_frame);
+
+void BKE_gpencil_update_frames_transformation_cache(struct Main *bmain,
+                                                    struct Scene *scene,
+                                                    struct ViewLayer *view_layer,
+                                                    struct Object *obact);
+
+void BKE_gpencil_clear_frames_transformation_cache_ex(struct Object *obact,
+                                                      int start_frame,
+                                                      int end_frame);
+void BKE_gpencil_clear_frames_transformation_cache(struct Scene *scene, struct Object *obact);
+
+void BKE_gpencil_frame_reset_transformation(struct bGPDframe *gpf);
 
 #ifdef __cplusplus
 }

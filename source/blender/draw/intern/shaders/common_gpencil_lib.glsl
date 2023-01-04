@@ -136,6 +136,7 @@ vec4 gpencil_vertex(ivec4 ma,
                     vec4 viewport_size,
                     gpMaterialFlag material_flags,
                     vec2 alignment_rot,
+                    mat4 frame_matrix,
                     /* World Position. */
                     out vec3 out_P,
                     /* World Normal. */
@@ -190,9 +191,9 @@ vec4 gpencil_vertex(ivec4 ma,
 
     bool use_curr = is_dot || (x == -1.0);
 
-    vec3 wpos_adj = transform_point(ModelMatrix, (use_curr) ? pos.xyz : pos3.xyz);
-    vec3 wpos1 = transform_point(ModelMatrix, pos1.xyz);
-    vec3 wpos2 = transform_point(ModelMatrix, pos2.xyz);
+    vec3 wpos_adj = transform_point(frame_matrix, (use_curr) ? pos.xyz : pos3.xyz);
+    vec3 wpos1 = transform_point(frame_matrix, pos1.xyz);
+    vec3 wpos2 = transform_point(frame_matrix, pos2.xyz);
 
     vec3 T;
     if (is_dot) {
@@ -250,7 +251,7 @@ vec4 gpencil_vertex(ivec4 ma,
         x_axis = vec2(1.0, 0.0);
       }
       else { /* GP_STROKE_ALIGNMENT_OBJECT */
-        vec4 ndc_x = point_world_to_ndc(wpos1 + ModelMatrix[0].xyz);
+        vec4 ndc_x = point_world_to_ndc(wpos1 + frame_matrix[0].xyz);
         vec2 ss_x = gpencil_project_to_screenspace(ndc_x, viewport_size);
         x_axis = safe_normalize(ss_x - ss1);
       }
@@ -319,7 +320,7 @@ vec4 gpencil_vertex(ivec4 ma,
   }
   else {
     /* Fill vertex. */
-    out_P = transform_point(ModelMatrix, pos1.xyz);
+    out_P = transform_point(frame_matrix, pos1.xyz);
     out_ndc = point_world_to_ndc(out_P);
     out_uv = uv1.xy;
     out_thickness.x = 1e18;
@@ -329,7 +330,7 @@ vec4 gpencil_vertex(ivec4 ma,
     out_sspos = vec4(0.0);
 
     /* Flat normal following camera and object bounds. */
-    vec3 V = cameraVec(ModelMatrix[3].xyz);
+    vec3 V = cameraVec(frame_matrix[3].xyz);
     vec3 N = normal_world_to_object(V);
     N *= OrcoTexCoFactors[1].xyz;
     N = normal_object_to_world(N);
@@ -369,6 +370,7 @@ vec4 gpencil_vertex(ivec4 ma,
                     vec4 col2,
                     vec4 fcol1,
                     vec4 viewport_size,
+                    mat4 matrix,
                     out vec3 out_P,
                     out vec3 out_N,
                     out vec4 out_color,
@@ -395,6 +397,7 @@ vec4 gpencil_vertex(ivec4 ma,
                         viewport_size,
                         0u,
                         vec2(1.0, 0.0),
+                        matrix,
                         out_P,
                         out_N,
                         out_color,

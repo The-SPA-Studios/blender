@@ -633,6 +633,12 @@ void bisect_v3_v3v3v3(float r[3], const float a[3], const float b[3], const floa
  */
 void rotate_v2_v2fl(float r[2], const float p[2], float angle);
 void rotate_v3_v3v3fl(float r[3], const float p[3], const float axis[3], float angle);
+
+/**
+ * Rotate a vector \a r by \a angle in-place.
+ */
+void rotate_v2_fl(float r[2], float angle);
+
 /**
  * Rotate a point \a p by \a angle around an arbitrary unit length \a axis.
  * http://local.wasp.uwa.edu.au/~pbourke/geometry/

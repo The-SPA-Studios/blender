@@ -776,6 +776,8 @@ typedef enum eDopeSheet_FilterFlag {
   ADS_FILTER_INCL_HIDDEN = (1 << 26),
   /** show only F-Curves which are disabled/have errors - for debugging drivers */
   ADS_FILTER_ONLY_ERRORS = (1 << 28),
+  /** Always show active object, event if not selected. */
+  ADS_FILTER_INCL_OBACT = (1 << 29),
 
 #if 0
   /** combination filters (some only used at runtime) */
@@ -808,6 +810,8 @@ typedef enum eDopeSheet_Flag {
   ADS_FLAG_NO_DB_SORT = (1 << 3),
   /** Invert the search filter */
   ADS_FLAG_INVERT_FILTER = (1 << 4),
+  /** Sync the channel selection with the object selection. */
+  ADS_FLAG_SYNC_SELECTION = (1 << 5),
 } eDopeSheet_Flag;
 
 typedef struct SpaceAction_Runtime {

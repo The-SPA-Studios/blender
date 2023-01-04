@@ -14,13 +14,16 @@ extern "C" {
 #include "BLI_sys_types.h" /* for bool */
 
 struct DLRBT_Tree;
-struct GPencilUpdateCache;
-struct bGPDframe;
-struct bGPDlayer;
-struct bGPDstroke;
+struct Depsgraph;
 struct bGPdata;
+struct bGPDlayer;
+struct bGPDframe;
+struct bGPDstroke;
+struct GPencilUpdateCache;
 
-/** #GPencilUpdateCache.flag */
+/* GPencilUpdateCache.flag */
+/* IMPORTANT: Because we are comparing the values of the flags, make sure that any potential
+ * new flag respects the "level" ordering. */
 typedef enum eGPUpdateCacheNodeFlag {
   /* Node is a placeholder (e.g. when only an index is needed). */
   GP_UPDATE_NODE_NO_COPY = 0,
@@ -127,10 +130,40 @@ void BKE_gpencil_tag_light_update(struct bGPdata *gpd,
                                   struct bGPDstroke *gps);
 
 /**
+ * Duplicates GPencilUpdateCache `gpd_cache` and its data. Assumes that it owns the data.
+ */
+GPencilUpdateCache *BKE_gpencil_duplicate_update_cache_and_data(GPencilUpdateCache *gpd_cache);
+
+/**
+ * Return true if cache A is subset of cache B. This means that all the elements of cache A are
+ * also cached by B.
+ */
+bool BKE_gpencil_update_cache_A_subset_of_B(GPencilUpdateCache *cache_A,
+                                            GPencilUpdateCache *cache_B);
+
+/**
  * Frees the GPencilUpdateCache on the gpd->runtime. This will not free the data that the cache
  * node might point to. It assumes that the cache does not own the data.
  */
 void BKE_gpencil_free_update_cache(struct bGPdata *gpd);
+
+/**
+ * Calls BKE_gpencil_free_update_cache in case the update cache can be disposed. Will return false
+ * in case this is not possible.
+ */
+bool BKE_gpencil_free_update_cache_if_disposable(const struct Depsgraph *depsgraph,
+                                                 struct bGPdata *gpd);
+
+/**
+ * Frees the GPencilUpdateCache `cache` as well as the data pointers. Assumes that the cache owns
+ * its data.
+ */
+void BKE_gpencil_free_update_cache_and_data(GPencilUpdateCache *cache);
+
+/**
+ * Print the update cache for debugging.
+ */
+void BKE_gpencil_print_update_cache(struct GPencilUpdateCache *cache);
 
 #ifdef __cplusplus
 }

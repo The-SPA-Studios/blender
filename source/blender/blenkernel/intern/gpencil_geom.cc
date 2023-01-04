@@ -1572,8 +1572,10 @@ void BKE_gpencil_stroke_fill_triangulate(bGPDstroke *gps)
   ARRAY_SET_ITEMS(minv, -1.0f, -1.0f);
   ARRAY_SET_ITEMS(maxv, 1.0f, 1.0f);
 
-  /* calc uv data */
-  gpencil_calc_stroke_fill_uv(points2d, gps, minv, maxv, uv);
+  if ((gps->flag & GP_STROKE_NO_AUTOMATIC_FILL_UVS) == 0) {
+    /* calc uv data */
+    gpencil_calc_stroke_fill_uv(points2d, gps, minv, maxv, uv);
+  }
 
   /* Save triangulation data. */
   if (gps->tot_triangles > 0) {
@@ -1585,9 +1587,11 @@ void BKE_gpencil_stroke_fill_triangulate(bGPDstroke *gps)
       memcpy(gps->triangles[i].verts, tmp_triangles[i], sizeof(uint[3]));
     }
 
-    /* Copy UVs to bGPDspoint. */
-    for (int i = 0; i < gps->totpoints; i++) {
-      copy_v2_v2(gps->points[i].uv_fill, uv[i]);
+    if ((gps->flag & GP_STROKE_NO_AUTOMATIC_FILL_UVS) == 0) {
+      /* Copy UVs to bGPDspoint. */
+      for (int i = 0; i < gps->totpoints; i++) {
+        copy_v2_v2(gps->points[i].uv_fill, uv[i]);
+      }
     }
   }
   else {
@@ -1607,7 +1611,8 @@ void BKE_gpencil_stroke_fill_triangulate(bGPDstroke *gps)
 
 void BKE_gpencil_stroke_uv_update(bGPDstroke *gps)
 {
-  if (gps == nullptr || gps->totpoints == 0) {
+  if (gps == nullptr || gps->totpoints == 0 ||
+      (gps->flag & GP_STROKE_NO_AUTOMATIC_FILL_UVS) != 0) {
     return;
   }
 

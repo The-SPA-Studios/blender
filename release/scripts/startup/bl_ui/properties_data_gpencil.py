@@ -210,9 +210,25 @@ class DATA_PT_gpencil_onion_skinning(DataButtonsPanel, Panel):
         layout.use_property_split = True
 
         col = layout.column()
+        col.prop(gpd, "onion_space")
+        if gpd.onion_space == "WORLD":
+            col.operator(
+                "gpencil.cache_ghost_frame_transformations",
+                text="Update Ghost Frame Cache",
+                icon="FILE_REFRESH")
+            col.operator(
+                "gpencil.clear_ghost_frame_transformation_cache",
+                text="Clear Ghost Frame Cache",
+                icon="X")
+
         col.prop(gpd, "onion_mode")
         col.prop(gpd, "onion_factor", text="Opacity", slider=True)
-        col.prop(gpd, "onion_keyframe_type")
+
+        labels = ['Keyframe', 'Extreme', 'Breakdown', 'Jitter', 'Moving Hold']
+        col = col.column(heading="Filter by Type")
+        for i in range(len(gpd.onion_keyframe_type)):
+            row = col.row()
+            row.prop(gpd, "onion_keyframe_type", index=i, text=labels[i])
 
         if gpd.onion_mode == 'ABSOLUTE':
             col = layout.column(align=True)

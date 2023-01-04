@@ -164,6 +164,9 @@ static void draw_channel_action_ranges(bAnimContext *ac, ListBase *anim_data, Vi
 
 void draw_channel_strips(bAnimContext *ac, SpaceAction *saction, ARegion *region)
 {
+  ViewLayer *view_layer = ac->view_layer;
+  Base *base = BASACT(view_layer);
+
   ListBase anim_data = {NULL, NULL};
   bAnimListElem *ale;
 
@@ -238,7 +241,8 @@ void draw_channel_strips(bAnimContext *ac, SpaceAction *saction, ARegion *region
             }
             case ANIMTYPE_SCENE:
             case ANIMTYPE_OBJECT: {
-              immUniformColor3ubvAlpha(col1b, sel ? col1[3] : col1b[3]);
+              const bool active = (ale->data == base);
+              immUniformColor3ubvAlpha(col1b, active ? col1[3] : col1b[3]);
               break;
             }
             case ANIMTYPE_FILLACTD:
@@ -270,6 +274,19 @@ void draw_channel_strips(bAnimContext *ac, SpaceAction *saction, ARegion *region
               else {
                 immUniformColor4ubv(sel ? col1 : col2);
               }
+              break;
+            }
+            case ANIMTYPE_GPLAYER: {
+              bGPDlayer *gpl = (bGPDlayer *)ale->data;
+              bGPdata *gpd = (bGPdata *)ale->id;
+
+              const bool active = (base != NULL) && (base->object->data == gpd) &&
+                                  (gpl->flag & GP_LAYER_ACTIVE);
+              const bool highlight = (gpl->flag & GP_LAYER_ACTIVE) || sel;
+
+              uchar *color;
+              color = highlight ? col1 : col2;
+              immUniformColor3ubvAlpha(color, active ? color[3] : col1b[3]);
               break;
             }
             default: {

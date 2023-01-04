@@ -2418,9 +2418,7 @@ static void rna_SequenceEditor_clamp_view_set(PointerRNA *ptr, bool value)
   }
 }
 
-static void rna_Sequencer_view_type_update(Main *UNUSED(bmain),
-                                           Scene *UNUSED(scene),
-                                           PointerRNA *ptr)
+static void rna_Sequencer_area_update(Main *UNUSED(bmain), Scene *UNUSED(scene), PointerRNA *ptr)
 {
   ScrArea *area = rna_area_from_space(ptr);
   ED_area_tag_refresh(area);
@@ -5143,6 +5141,11 @@ static void rna_def_space_view3d(BlenderRNA *brna)
       "(does not check the view is orthographic use \"is_perspective\" for that). "
       "Assignment sets the \"view_rotation\" to the closest axis aligned view");
 
+  prop = RNA_def_property(srna, "view_mirror_x", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "rflag", RV3D_VIEW_MIRROR_X);
+  RNA_def_property_ui_text(prop, "Mirror View Horizontally", "Mirror view horizontally");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, NULL);
+
   /* This isn't directly accessible from the UI, only an operator. */
   prop = RNA_def_property(srna, "use_clip_planes", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, NULL, "rflag", RV3D_CLIPPING);
@@ -5175,6 +5178,11 @@ static void rna_def_space_view3d(BlenderRNA *brna)
       prop, "rna_RegionView3D_view_rotation_get", "rna_RegionView3D_view_rotation_set", NULL);
 #  endif
   RNA_def_property_ui_text(prop, "View Rotation", "Rotation in quaternions (keep normalized)");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, NULL);
+
+  prop = RNA_def_property(srna, "view_roll_angle", PROP_FLOAT, PROP_ANGLE);
+  RNA_def_property_float_sdna(prop, NULL, "rot_angle");
+  RNA_def_property_ui_text(prop, "View Roll Angle", "View roll angle (in radians)");
   RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, NULL);
 
   /* not sure we need rna access to these but adding anyway */
@@ -5673,7 +5681,7 @@ static void rna_def_space_sequencer(BlenderRNA *brna)
   RNA_def_property_enum_items(prop, rna_enum_space_sequencer_view_type_items);
   RNA_def_property_ui_text(
       prop, "View Type", "Type of the Sequencer view (sequencer, preview or both)");
-  RNA_def_property_update(prop, 0, "rna_Sequencer_view_type_update");
+  RNA_def_property_update(prop, 0, "rna_Sequencer_area_update");
 
   /* display type, fairly important */
   prop = RNA_def_property(srna, "display_mode", PROP_ENUM, PROP_NONE);
@@ -5837,6 +5845,14 @@ static void rna_def_space_sequencer(BlenderRNA *brna)
   RNA_def_property_array(prop, 2);
   RNA_def_property_ui_text(prop, "2D Cursor Location", "2D cursor location for this view");
   RNA_def_property_update(prop, NC_SPACE | ND_SPACE_SEQUENCER, NULL);
+
+  prop = RNA_def_property(srna, "scene_override", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, NULL, "scene_override");
+  RNA_def_property_struct_type(prop, "Scene");
+  RNA_def_property_pointer_funcs(prop, NULL, NULL, NULL, NULL);
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_PTR_NO_OWNERSHIP);
+  RNA_def_property_ui_text(prop, "Scene Override", "Scene to use in this region");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_SEQUENCER, "rna_Sequencer_area_update");
 }
 
 static void rna_def_space_text(BlenderRNA *brna)

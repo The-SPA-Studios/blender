@@ -217,6 +217,7 @@ class Params:
 # Constants
 
 from math import pi
+from pickle import NONE
 pi_2 = pi / 2.0
 
 # Physical layout.
@@ -528,7 +529,28 @@ def _template_items_tool_select_actions(operator, *, type, value):
     ]
 
 
+def _template_items_tool_select_actions_with_alt(operator, *, type, value):
+    kmi_args = {"type": type, "value": value}
+    return [
+        (operator, kmi_args, None),
+        (operator, {**kmi_args, "alt": True}, None),
+        (operator, {**kmi_args, "shift": True},
+         {"properties": [("mode", 'ADD')]}),
+        (operator, {**kmi_args, "shift": True, "alt": True},
+         {"properties": [("mode", 'ADD')]}),
+        (operator, {**kmi_args, "ctrl": True},
+         {"properties": [("mode", 'SUB')]}),
+        (operator, {**kmi_args, "ctrl": True, "alt": True},
+         {"properties": [("mode", 'SUB')]}),
+        (operator, {**kmi_args, "shift": True, "ctrl": True},
+         {"properties": [("mode", 'AND')]}),
+        (operator, {**kmi_args, "shift": True, "ctrl": True, "alt": True},
+         {"properties": [("mode", 'AND')]}),
+    ]
+
 # This could have a more generic name, for now use for circle select.
+
+
 def _template_items_tool_select_actions_simple(operator, *, type, value, properties=()):
     kmi_args = {"type": type, "value": value}
     return [
@@ -2378,7 +2400,7 @@ def km_dopesheet(params):
          {"properties": [("deselect_all", not params.legacy)]}),
         ("action.clickselect",
          {"type": params.select_mouse, "value": 'PRESS', "alt": True},
-         {"properties": [("column", True)]}),
+         {"properties": [("gpencil_tag", True)]}),
         ("action.clickselect",
          {"type": params.select_mouse, "value": 'PRESS', "shift": True},
          {"properties": [("extend", True)]}),
@@ -2441,7 +2463,7 @@ def km_dopesheet(params):
         ("action.easing_type", {"type": 'E', "value": 'PRESS', "ctrl": True}, None),
         ("action.keyframe_type", {"type": 'R', "value": 'PRESS'}, None),
         ("action.sample", {"type": 'O', "value": 'PRESS', "shift": True, "alt": True}, None),
-        op_menu("DOPESHEET_MT_delete", {"type": 'X', "value": 'PRESS'}),
+        ("action.delete", {"type": 'X', "value": 'PRESS'}, {"properties": [("confirm", False)]}),
         ("action.delete", {"type": 'DEL', "value": 'PRESS'}, {"properties": [("confirm", False)]}),
         ("action.duplicate_move", {"type": 'D', "value": 'PRESS', "shift": True}, None),
         ("action.keyframe_insert", {"type": 'I', "value": 'PRESS'}, None),
@@ -3549,6 +3571,8 @@ def km_grease_pencil(params):
             ("gpencil.annotate",
              {"type": 'RIGHTMOUSE', "value": 'PRESS', "key_modifier": 'D'},
              {"properties": [("mode", 'ERASER'), ("wait_for_input", False)]}),
+            # Pick active layer
+            ("gpencil.pick_active_layer", {"type": params.select_mouse, "value": params.select_mouse_value, "alt": True}, None),
         ])
 
     return keymap
@@ -3803,13 +3827,8 @@ def km_grease_pencil_stroke_paint_draw_brush(params):
 
     items.extend([
         # Draw
-        ("gpencil.draw", {"type": 'LEFTMOUSE', "value": 'PRESS'},
-         {"properties": [("mode", 'DRAW'), ("wait_for_input", False)]}),
-        ("gpencil.draw", {"type": 'LEFTMOUSE', "value": 'PRESS', "shift": True},
-         {"properties": [("mode", 'DRAW'), ("wait_for_input", False)]}),
-        # Draw - straight lines
-        ("gpencil.draw", {"type": 'LEFTMOUSE', "value": 'PRESS', "alt": True},
-         {"properties": [("mode", 'DRAW_STRAIGHT'), ("wait_for_input", False)]}),
+        ("gpencil.paint", {"type": 'LEFTMOUSE', "value": 'PRESS'}, {"properties": []}),
+        ("gpencil.paint", {"type": 'LEFTMOUSE', "value": 'PRESS', "shift": True}, {"properties": []}),
         # Erase
         ("gpencil.draw", {"type": 'LEFTMOUSE', "value": 'PRESS', "ctrl": True},
          {"properties": [("mode", 'ERASER'), ("wait_for_input", False)]}),
@@ -3842,6 +3861,9 @@ def km_grease_pencil_stroke_paint_draw_brush(params):
         ("gpencil.select_box", {"type": 'B', "value": 'PRESS'}, None),
         # Lasso select
         ("gpencil.select_lasso", {"type": params.action_mouse, "value": 'CLICK_DRAG', "ctrl": True, "alt": True}, None),
+        # Copy/Paste
+        ("gpencil.copy", {"type": 'C', "value": 'PRESS', "ctrl": True}, None),
+        ("gpencil.paste", {"type": 'V', "value": 'PRESS', "ctrl": True}, None),
     ])
 
     return keymap
@@ -7489,6 +7511,16 @@ def km_3d_view_tool_paint_weight_gradient(params):
 # ------------------------------------------------------------------------------
 # Tool System (3D View, Grease Pencil, Paint)
 
+def km_3d_view_tool_paint_gpencil_paint(params):
+    return (
+        "3D View Tool: Paint Gpencil, Paint",
+        {"space_type": 'VIEW_3D', "region_type": 'WINDOW'},
+        {"items": [
+            ("gpencil.paint", {"type": params.tool_mouse, "value": 'PRESS'}, None),
+        ]},
+    )
+
+
 def km_3d_view_tool_paint_gpencil_line(params):
     return (
         "3D View Tool: Paint Gpencil, Line",
@@ -7630,8 +7662,45 @@ def km_3d_view_tool_paint_gpencil_interpolate(params):
     )
 
 
+def km_3d_view_tool_paint_gpencil_quick_edit(params, *, fallback):
+    mouse_type = (params.select_mouse if (fallback and params.use_fallback_tool_select_mouse) else params.tool_mouse)
+    event = {"type": mouse_type, "value": 'CLICK_DRAG'}
+    return (
+        _fallback_id("3D View Tool: Paint Gpencil, Quick Edit", fallback),
+        {"space_type": 'VIEW_3D', "region_type": 'WINDOW'},
+        {"items": [
+            ("gpencil.select", {"type": params.select_mouse, "value": params.select_mouse_value},
+                {"properties": [("deselect_all", not params.legacy)]}),
+            ("gpencil.select", {"type": params.select_mouse, "value": params.select_mouse_value, "shift": True},
+                {"properties": [("extend", True), ("toggle", True)]}),
+            ("gpencil.select_all", {"type": 'A', "value": 'PRESS'}, {"properties": [("action", 'SELECT')]}),
+            ("gpencil.select_all", {"type": 'A', "value": 'PRESS', "alt": True}, {"properties": [("action", 'DESELECT')]}),
+            op_menu("GPENCIL_MT_move_to_layer", {"type": 'M', "value": 'PRESS'}),
+            ("gpencil.delete", {"type": 'X', "value": 'PRESS'}, {"properties": [("type", 'STROKES')]}),
+            ("gpencil.copy", {"type": 'C', "value": 'PRESS', "ctrl": True}, None),
+            ("gpencil.paste", {"type": 'V', "value": 'PRESS', "ctrl": True}, None),
+            *([] if (fallback and not params.use_fallback_tool) else [
+                ("gpencil.select_lasso", event, None),
+                ("gpencil.select_lasso", {**event, "alt": True}, None),
+                ("gpencil.select_lasso", {**event, "shift": True},
+                    {"properties": [("mode", 'ADD')]}),
+                ("gpencil.select_lasso", {**event, "shift": True, "alt": True},
+                    {"properties": [("mode", 'ADD')]}),
+                ("gpencil.select_lasso", {**event, "ctrl": True},
+                    {"properties": [("mode", 'SUB')]}),
+                ("gpencil.select_lasso", {**event, "ctrl": True, "alt": True},
+                    {"properties": [("mode", 'SUB')]}),
+                ("gpencil.select_lasso", {**event, "shift": True, "ctrl": True},
+                    {"properties": [("mode", 'AND')]}),
+                ("gpencil.select_lasso", {**event, "shift": True, "ctrl": True, "alt": True},
+                    {"properties": [("mode", 'AND')]}),
+            ]),
+        ]}
+    )
+
 # ------------------------------------------------------------------------------
 # Tool System (3D View, Grease Pencil, Edit)
+
 
 def km_3d_view_tool_edit_gpencil_select(params, *, fallback):
     return (
@@ -7766,6 +7835,20 @@ def km_3d_view_tool_edit_gpencil_interpolate(params):
         {"items": [
             ("gpencil.interpolate", params.tool_maybe_tweak_event,
              {"properties": [("release_confirm", True)]}),
+        ]},
+    )
+
+
+def km_3d_view_tool_edit_gpencil_frame_offset(params, *, fallback):
+    return (
+        _fallback_id("3D View Tool: Edit Gpencil, Frame Offset", fallback),
+        {"space_type": 'VIEW_3D', "region_type": 'WINDOW'},
+        {"items": [
+            *([] if (fallback and (params.select_mouse == 'RIGHTMOUSE')) else _template_items_tool_select(
+                params, "gpencil.select", "view3d.cursor3d", fallback=fallback)),
+            *([] if (not params.use_fallback_tool_rmb) else _template_view3d_gpencil_select(
+                type=params.select_mouse, value=params.select_mouse_value, legacy=params.legacy)),
+            ("gpencil.pick_frame_offset", {"type": 'LEFTMOUSE', "value": 'PRESS', "alt": True}, None),
         ]},
     )
 
@@ -8155,6 +8238,7 @@ def generate_keymaps(params=None):
         km_3d_view_tool_paint_weight_sample_weight(params),
         km_3d_view_tool_paint_weight_sample_vertex_group(params),
         km_3d_view_tool_paint_weight_gradient(params),
+        km_3d_view_tool_paint_gpencil_paint(params),
         km_3d_view_tool_paint_gpencil_line(params),
         km_3d_view_tool_paint_gpencil_polyline(params),
         km_3d_view_tool_paint_gpencil_box(params),
@@ -8164,6 +8248,7 @@ def generate_keymaps(params=None):
         km_3d_view_tool_paint_gpencil_cutter(params),
         km_3d_view_tool_paint_gpencil_eyedropper(params),
         km_3d_view_tool_paint_gpencil_interpolate(params),
+        *(km_3d_view_tool_paint_gpencil_quick_edit(params, fallback=fallback) for fallback in (False, True)),
         *(km_3d_view_tool_edit_gpencil_select(params, fallback=fallback) for fallback in (False, True)),
         *(km_3d_view_tool_edit_gpencil_select_box(params, fallback=fallback) for fallback in (False, True)),
         *(km_3d_view_tool_edit_gpencil_select_circle(params, fallback=fallback) for fallback in (False, True)),
@@ -8175,6 +8260,7 @@ def generate_keymaps(params=None):
         km_3d_view_tool_edit_gpencil_to_sphere(params),
         km_3d_view_tool_edit_gpencil_transform_fill(params),
         km_3d_view_tool_edit_gpencil_interpolate(params),
+        *(km_3d_view_tool_edit_gpencil_frame_offset(params, fallback=fallback) for fallback in (False, True)),
         km_3d_view_tool_sculpt_gpencil_select(params),
         km_3d_view_tool_sculpt_gpencil_select_box(params),
         km_3d_view_tool_sculpt_gpencil_select_circle(params),

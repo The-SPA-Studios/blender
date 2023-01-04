@@ -36,12 +36,14 @@ struct SnapObjectContext;
 struct ToolSettings;
 struct View3D;
 struct bContext;
+struct UndoType;
 
 struct Material;
 struct Object;
 
 struct KeyframeEditData;
 struct bAnimContext;
+struct bAnimListElem;
 
 struct wmKeyConfig;
 struct wmOperator;
@@ -198,6 +200,7 @@ bool ED_gpencil_stroke_material_visible(struct Object *ob, const struct bGPDstro
 void ED_keymap_gpencil(struct wmKeyConfig *keyconf);
 
 void ED_operatortypes_gpencil(void);
+void ED_operatortypes_paint_gpencil(void);
 void ED_operatormacros_gpencil(void);
 
 /* ------------- Copy-Paste Buffers -------------------- */
@@ -253,10 +256,7 @@ void ED_gpencil_layer_make_cfra_list(struct bGPDlayer *gpl, ListBase *elems, boo
  * Check if one of the frames in this layer is selected.
  */
 bool ED_gpencil_layer_frame_select_check(const struct bGPDlayer *gpl);
-/**
- * Set all/none/invert select.
- */
-void ED_gpencil_layer_frame_select_set(struct bGPDlayer *gpl, short mode);
+
 /**
  * Select the frames in this layer that occur within the bounds specified.
  */
@@ -264,6 +264,11 @@ void ED_gpencil_layer_frames_select_box(struct bGPDlayer *gpl,
                                         float min,
                                         float max,
                                         short select_mode);
+
+bool ED_gpencil_layer_frame_select_region(struct KeyframeEditData *ked,
+                                          struct bGPDframe *gpf,
+                                          short tool,
+                                          short select_mode);
 /**
  * Select the frames in this layer that occur within the lasso/circle region specified.
  */
@@ -275,15 +280,22 @@ void ED_gpencil_layer_frames_select_region(struct KeyframeEditData *ked,
  * Set all/none/invert select (like above, but with SELECT_* modes).
  */
 void ED_gpencil_select_frames(struct bGPDlayer *gpl, short select_mode);
+void ED_gpencil_tag_frames(struct bGPDlayer *gpl, short tag_mode);
 /**
  * Select the frame in this layer that occurs on this frame (there should only be one at most).
  */
-void ED_gpencil_select_frame(struct bGPDlayer *gpl, int selx, short select_mode);
+void ED_gpencil_select_frame(struct bGPDlayer *gpl, struct bGPDframe *gpf, short select_mode);
+
+void ED_gpencil_tag_frame(struct bGPDlayer *gpl, struct bGPDframe *gpf, short tag_mode);
 
 /**
  * Set the layer's channel as active
  */
-void ED_gpencil_set_active_channel(struct bGPdata *gpd, struct bGPDlayer *gpl);
+void ED_gpencil_set_active_channel(struct bContext *C,
+                                   struct bAnimContext *ac,
+                                   struct bAnimListElem *ale,
+                                   const short selectmode,
+                                   int filter);
 
 /**
  * Delete selected frames.
@@ -341,6 +353,8 @@ int ED_gpencil_session_active(void);
  * \param step: eUndoStepDir.
  */
 int ED_undo_gpencil_step(struct bContext *C, int step); /* eUndoStepDir. */
+
+void ED_gpencil_undosys_type(struct UndoType *ut);
 
 /* ------------ Grease-Pencil Armature ------------------ */
 bool ED_gpencil_add_armature(const struct bContext *C,
@@ -640,6 +654,8 @@ struct bGPDstroke *ED_gpencil_stroke_join_and_trim(struct bGPdata *gpd,
  * Close if the distance between extremes is below threshold.
  */
 void ED_gpencil_stroke_close_by_distance(struct bGPDstroke *gps, float threshold);
+
+bool ED_gpencil_cache_frame_transformations_background(struct bContext *C, struct Object *ob);
 
 #ifdef __cplusplus
 }

@@ -31,6 +31,7 @@
 #include "BKE_gpencil.h"
 #include "BKE_gpencil_curve.h"
 #include "BKE_gpencil_geom.h"
+#include "BKE_gpencil_update_cache.h"
 #include "BKE_material.h"
 #include "BKE_report.h"
 
@@ -138,6 +139,26 @@ static bool gpencil_3d_point_to_screen_space(ARegion *region,
   return false;
 }
 
+/* Helper to tag all the editable frames for and update. */
+static void gpencil_tag_editable_frames(bGPdata *gpd)
+{
+  const bool is_multiedit = (bool)GPENCIL_MULTIEDIT_SESSIONS_ON(gpd);
+  LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
+    if (BKE_gpencil_layer_is_editable(gpl) && (gpl->actframe)) {
+      if (is_multiedit) {
+        LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+          if ((gpf == gpl->actframe) || ((gpf->flag & GP_FRAME_SELECT) && (is_multiedit))) {
+            BKE_gpencil_tag_full_update(gpd, gpl, gpf, NULL);
+          }
+        }
+      }
+      else {
+        BKE_gpencil_tag_full_update(gpd, gpl, gpl->actframe, NULL);
+      }
+    }
+  }
+}
+
 /* helper to deselect all selected strokes/points */
 static void deselect_all_selected(bContext *C)
 {
@@ -176,6 +197,8 @@ static void deselect_all_selected(bContext *C)
     }
   }
   CTX_DATA_END;
+
+  gpencil_tag_editable_frames(gpd);
 }
 
 static void select_all_stroke_points(bGPdata *gpd, bGPDstroke *gps, bool select)
@@ -227,6 +250,20 @@ static void select_all_curve_points(bGPdata *gpd, bGPDstroke *gps, bGPDcurve *gp
   }
 }
 
+typedef struct GP_SelectUserData {
+  int mx, my, radius;
+  /* Bounding box rect */
+  rcti rect;
+  const int (*lasso_coords)[2];
+  int lasso_coords_len;
+} GP_SelectUserData;
+
+typedef bool (*GPencilTestFn)(ARegion *region,
+                              const float diff_mat[4][4],
+                              const float pt1[3],
+                              const float pt2[3],
+                              GP_SelectUserData *user_data);
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -260,9 +297,9 @@ static int gpencil_select_all_exec(bContext *C, wmOperator *op)
   }
 
   /* If not edit/sculpt mode, the event has been caught but not processed. */
-  if (GPENCIL_NONE_EDIT_MODE(gpd)) {
-    return OPERATOR_CANCELLED;
-  }
+  // if (GPENCIL_NONE_EDIT_MODE(gpd)) {
+  //   return OPERATOR_CANCELLED;
+  // }
 
   /* For sculpt mode, if mask is disable, only allows deselect */
   if (GPENCIL_SCULPT_MODE(gpd)) {
@@ -1464,6 +1501,34 @@ void GPENCIL_OT_select_less(wmOperatorType *ot)
 /** \name Circle Select Operator
  * \{ */
 
+static bool gpencil_test_circle(ARegion *region,
+                                const float diff_mat[4][4],
+                                const float pt1[3],
+                                const float pt2[3],
+                                GP_SelectUserData *user_data)
+{
+  int co1[2] = {0};
+  int mouse[2] = {user_data->mx, user_data->my};
+  float mousef[2];
+  copy_v2fl_v2i(mousef, mouse);
+  int radius = user_data->radius;
+  if (gpencil_3d_point_to_screen_space(region, diff_mat, pt1, co1)) {
+    if (pt2) {
+      int co2[2] = {0};
+      if (gpencil_3d_point_to_screen_space(region, diff_mat, pt2, co2)) {
+        float co1f[2], co2f[2];
+        copy_v2fl_v2i(co1f, co1);
+        copy_v2fl_v2i(co2f, co2);
+        return dist_squared_to_line_segment_v2(mousef, co1f, co2f) <= radius * radius;
+      }
+    }
+    return (BLI_rcti_isect_pt(&user_data->rect, co1[0], co1[1]) &&
+            (((co1[0] - mouse[0]) * (co1[0] - mouse[0]) +
+              (co1[1] - mouse[1]) * (co1[1] - mouse[1])) <= radius * radius));
+  }
+  return false;
+}
+
 /**
  * Helper to check if a given stroke is within the area.
  *
@@ -1471,13 +1536,12 @@ void GPENCIL_OT_select_less(wmOperatorType *ot)
  * from gpencil_paint.c #gpencil_stroke_eraser_dostroke().
  * It would be great to de-duplicate the logic here sometime, but that can wait.
  */
-static bool gpencil_stroke_do_circle_sel(bGPdata *gpd,
+static bool gpencil_stroke_do_circle_sel(ARegion *region,
+                                         bGPdata *gpd,
                                          bGPDlayer *gpl,
                                          bGPDstroke *gps,
-                                         GP_SpaceConversion *gsc,
-                                         const int mx,
-                                         const int my,
-                                         const int radius,
+                                         GPencilTestFn is_inside_fn,
+                                         GP_SelectUserData *user_data,
                                          const bool select,
                                          rcti *rect,
                                          const float diff_mat[4][4],
@@ -1485,59 +1549,60 @@ static bool gpencil_stroke_do_circle_sel(bGPdata *gpd,
                                          const float scale,
                                          const bool is_curve_edit)
 {
-  bGPDspoint *pt = NULL;
-  int x0 = 0, y0 = 0;
-  int i;
   bool changed = false;
   bGPDstroke *gps_active = (gps->runtime.gps_orig) ? gps->runtime.gps_orig : gps;
-  bGPDspoint *pt_active = NULL;
+  const bool is_cyclic = ((gps_active->flag & GP_STROKE_CYCLIC) != 0);
   bool hit = false;
+  const bool strokemode = (selectmode == GP_SELECTMODE_STROKE);
 
-  for (i = 0, pt = gps->points; i < gps->totpoints; i++, pt++) {
-    pt_active = (pt->runtime.pt_orig) ? pt->runtime.pt_orig : pt;
+  for (int i = 0; i < gps->totpoints; i++) {
+    bGPDspoint *pt = &gps->points[i];
+    bGPDspoint *pt_active = (pt->runtime.pt_orig) ? pt->runtime.pt_orig : pt;
 
-    bGPDspoint pt_temp;
-    gpencil_point_to_parent_space(pt, diff_mat, &pt_temp);
-    gpencil_point_to_xy(gsc, gps, &pt_temp, &x0, &y0);
+    int idx_next = (i + 1) % gps->totpoints;
+    bGPDspoint *pt_next = (strokemode && (idx_next != 0 || is_cyclic)) ? &gps->points[idx_next] :
+                                                                         NULL;
+    bGPDspoint *pt_next_active = (pt_next && pt_next->runtime.pt_orig) ? pt_next->runtime.pt_orig :
+                                                                         pt_next;
 
-    /* do boundbox check first */
-    if ((!ELEM(V2D_IS_CLIPPED, x0, y0)) && BLI_rcti_isect_pt(rect, x0, y0)) {
-      /* only check if point is inside */
-      if (((x0 - mx) * (x0 - mx) + (y0 - my) * (y0 - my)) <= radius * radius) {
-        hit = true;
+    /* convert point coords to screenspace */
+    const bool is_inside = is_inside_fn(
+        region, diff_mat, &pt->x, pt_next ? &pt_next->x : NULL, user_data);
+    if (is_inside) {
+      hit = true;
+      changed = true;
+      /* if stroke mode, don't check more points */
+      if (strokemode) {
+        break;
+      }
 
-        /* change selection */
-        if (select) {
-          pt_active->flag |= GP_SPOINT_SELECT;
-          gps_active->flag |= GP_STROKE_SELECT;
-          BKE_gpencil_stroke_select_index_set(gpd, gps_active);
-        }
-        else {
-          pt_active->flag &= ~GP_SPOINT_SELECT;
-          gps_active->flag &= ~GP_STROKE_SELECT;
-          BKE_gpencil_stroke_select_index_reset(gps_active);
-        }
-        changed = true;
-        /* if stroke mode, don't check more points */
-        if ((hit) && (selectmode == GP_SELECTMODE_STROKE)) {
-          break;
-        }
+      /* change selection */
+      if (select) {
+        pt_active->flag |= GP_SPOINT_SELECT;
+        gps_active->flag |= GP_STROKE_SELECT;
+        BKE_gpencil_stroke_select_index_set(gpd, gps_active);
+      }
+      else {
+        pt_active->flag &= ~GP_SPOINT_SELECT;
+        gps_active->flag &= ~GP_STROKE_SELECT;
+        BKE_gpencil_stroke_select_index_reset(gps_active);
+      }
 
-        /* Expand selection to segment. */
-        if ((hit) && (selectmode == GP_SELECTMODE_SEGMENT) && (select) && (pt_active != NULL)) {
-          float r_hita[3], r_hitb[3];
-          bool hit_select = (bool)(pt_active->flag & GP_SPOINT_SELECT);
-          ED_gpencil_select_stroke_segment(
-              gpd, gpl, gps_active, pt_active, hit_select, false, scale, r_hita, r_hitb);
-        }
+      /* Expand selection to segment. */
+      if ((hit) && (selectmode == GP_SELECTMODE_SEGMENT) && (select) && (pt_active != NULL)) {
+        float r_hita[3], r_hitb[3];
+        bool hit_select = (bool)(pt_active->flag & GP_SPOINT_SELECT);
+        ED_gpencil_select_stroke_segment(
+            gpd, gpl, gps_active, pt_active, hit_select, false, scale, r_hita, r_hitb);
       }
     }
   }
 
   /* If stroke mode expand selection. */
-  if ((hit) && (selectmode == GP_SELECTMODE_STROKE)) {
-    for (i = 0, pt = gps->points; i < gps->totpoints; i++, pt++) {
-      pt_active = (pt->runtime.pt_orig) ? pt->runtime.pt_orig : pt;
+  if ((hit) && strokemode) {
+    for (int i = 0; i < gps->totpoints; i++) {
+      bGPDspoint *pt = &gps->points[i];
+      bGPDspoint *pt_active = (pt->runtime.pt_orig) ? pt->runtime.pt_orig : pt;
       if (pt_active != NULL) {
         if (select) {
           pt_active->flag |= GP_SPOINT_SELECT;
@@ -1661,6 +1726,7 @@ static bool gpencil_do_curve_circle_sel(bContext *C,
 
 static int gpencil_circle_select_exec(bContext *C, wmOperator *op)
 {
+  ARegion *region = CTX_wm_region(C);
   bGPdata *gpd = ED_gpencil_data_get_active(C);
   ToolSettings *ts = CTX_data_tool_settings(C);
   Object *ob = CTX_data_active_object(C);
@@ -1708,6 +1774,12 @@ static int gpencil_circle_select_exec(bContext *C, wmOperator *op)
   rect.xmax = mx + radius;
   rect.ymax = my + radius;
 
+  GP_SelectUserData data = {0};
+  data.mx = mx;
+  data.my = my;
+  data.radius = radius;
+  data.rect = rect;
+
   if (is_curve_edit) {
     if (SEL_OP_USE_PRE_DESELECT(sel_op)) {
       ED_gpencil_select_curve_toggle_all(C, SEL_DESELECT);
@@ -1723,10 +1795,6 @@ static int gpencil_circle_select_exec(bContext *C, wmOperator *op)
   }
 
   if (changed == false) {
-    GP_SpaceConversion gsc = {NULL};
-    /* init space conversion stuff */
-    gpencil_point_conversion_init(C, &gsc);
-
     if (SEL_OP_USE_PRE_DESELECT(sel_op)) {
       ED_gpencil_select_toggle_all(C, SEL_DESELECT);
       changed = true;
@@ -1734,13 +1802,12 @@ static int gpencil_circle_select_exec(bContext *C, wmOperator *op)
 
     /* find visible strokes, and select if hit */
     GP_EVALUATED_STROKES_BEGIN (gpstroke_iter, C, gpl, gps) {
-      changed |= gpencil_stroke_do_circle_sel(gpd,
+      changed |= gpencil_stroke_do_circle_sel(region,
+                                              gpd,
                                               gpl,
                                               gps,
-                                              &gsc,
-                                              mx,
-                                              my,
-                                              radius,
+                                              gpencil_test_circle,
+                                              &data,
                                               select,
                                               &rect,
                                               gpstroke_iter.diff_mat,
@@ -1795,19 +1862,6 @@ void GPENCIL_OT_select_circle(wmOperatorType *ot)
  * Use for lasso & box select.
  *
  * \{ */
-
-typedef struct GP_SelectUserData {
-  int mx, my, radius;
-  /* Bounding box rect */
-  rcti rect;
-  const int (*lasso_coords)[2];
-  int lasso_coords_len;
-} GP_SelectUserData;
-
-typedef bool (*GPencilTestFn)(ARegion *region,
-                              const float diff_mat[4][4],
-                              const float pt[3],
-                              GP_SelectUserData *user_data);
 
 #if 0
 static bool gpencil_stroke_fill_isect_rect(ARegion *region,
@@ -1908,7 +1962,7 @@ static bool gpencil_generic_curve_select(bContext *C,
       if (handles_visible) {
         for (int j = 0; j < 3; j++) {
           const bool is_select = BEZT_ISSEL_IDX(bezt, j);
-          bool is_inside = is_inside_fn(region, gps_iter.diff_mat, bezt->vec[j], user_data);
+          bool is_inside = is_inside_fn(region, gps_iter.diff_mat, bezt->vec[j], NULL, user_data);
           if (strokemode) {
             if (is_inside) {
               hit = true;
@@ -1943,7 +1997,7 @@ static bool gpencil_generic_curve_select(bContext *C,
       /* If the handles are not visible only check ctrl point (vec[1]). */
       else {
         const bool is_select = bezt->f2;
-        bool is_inside = is_inside_fn(region, gps_iter.diff_mat, bezt->vec[1], user_data);
+        bool is_inside = is_inside_fn(region, gps_iter.diff_mat, bezt->vec[1], NULL, user_data);
         if (strokemode) {
           if (is_inside) {
             hit = true;
@@ -2034,45 +2088,46 @@ static bool gpencil_generic_stroke_select(bContext *C,
                                           const float scale,
                                           const bool is_curve_edit)
 {
+  ToolSettings *ts = CTX_data_tool_settings(C);
   GP_SpaceConversion gsc = {NULL};
   bool changed = false;
   /* init space conversion stuff */
   gpencil_point_conversion_init(C, &gsc);
 
   /* deselect all strokes first? */
-  if (SEL_OP_USE_PRE_DESELECT(sel_op) || (GPENCIL_PAINT_MODE(gpd))) {
-    /* Set selection index to 0. */
-    gpd->select_last_index = 0;
-
-    CTX_DATA_BEGIN (C, bGPDstroke *, gps, editable_gpencil_strokes) {
-      bGPDspoint *pt;
-      int i;
-
-      for (i = 0, pt = gps->points; i < gps->totpoints; i++, pt++) {
-        pt->flag &= ~GP_SPOINT_SELECT;
-      }
-
-      gps->flag &= ~GP_STROKE_SELECT;
-      BKE_gpencil_stroke_select_index_reset(gps);
-    }
-    CTX_DATA_END;
-
+  if (SEL_OP_USE_PRE_DESELECT(sel_op)) {
+    deselect_all_selected(C);
     changed = true;
   }
 
   /* select/deselect points */
   GP_EVALUATED_STROKES_BEGIN (gpstroke_iter, C, gpl, gps) {
+    if ((ts->gpencil_flags & GP_TOOL_FLAG_ONLY_ACTIVE_LAYER) != 0 &&
+        (gpl->flag & GP_LAYER_ACTIVE) == 0) {
+      continue;
+    }
+
     bGPDstroke *gps_active = (gps->runtime.gps_orig) ? gps->runtime.gps_orig : gps;
+    const bool is_cyclic = ((gps_active->flag & GP_STROKE_CYCLIC) != 0);
     bool whole = false;
 
-    bGPDspoint *pt;
-    int i;
     bool hit = false;
-    for (i = 0, pt = gps->points; i < gps->totpoints; i++, pt++) {
+    for (int i = 0; i < gps->totpoints; i++) {
+      bGPDspoint *pt = &gps->points[i];
       bGPDspoint *pt_active = (pt->runtime.pt_orig) ? pt->runtime.pt_orig : pt;
+      int idx_next = (i + 1) % gps->totpoints;
+      /* Make sure to consider cyclic strokes properly. */
+      bGPDspoint *pt_next = (strokemode && (idx_next != 0 || is_cyclic)) ? &gps->points[idx_next] :
+                                                                           NULL;
+      bGPDspoint *pt_next_active = (pt_next && pt_next->runtime.pt_orig) ?
+                                       pt_next->runtime.pt_orig :
+                                       pt_next;
 
       /* Convert point coords to screen-space. */
-      const bool is_inside = is_inside_fn(gsc.region, gpstroke_iter.diff_mat, &pt_active->x, user_data);
+      /*NOTE: Do intersection test with eval points position, to consider modifier changes. */
+      const bool is_inside = is_inside_fn(
+          gsc.region, gpstroke_iter.diff_mat, &pt->x, pt_next ? &pt_next->x : NULL, user_data);
+
       if (strokemode == false) {
         const bool is_select = (pt_active->flag & GP_SPOINT_SELECT) != 0;
         const int sel_op_result = ED_select_op_action_deselected(sel_op, is_select, is_inside);
@@ -2119,7 +2174,8 @@ static bool gpencil_generic_stroke_select(bContext *C,
       const bool is_inside = hit || whole;
       const int sel_op_result = ED_select_op_action_deselected(sel_op, is_select, is_inside);
       if (sel_op_result != -1) {
-        for (i = 0, pt = gps->points; i < gps->totpoints; i++, pt++) {
+        for (int i = 0; i < gps->totpoints; i++) {
+          bGPDspoint *pt = &gps->points[i];
           bGPDspoint *pt_active = (pt->runtime.pt_orig) ? pt->runtime.pt_orig : pt;
 
           if (sel_op_result) {
@@ -2141,6 +2197,12 @@ static bool gpencil_generic_stroke_select(bContext *C,
       select_all_curve_points(gpd, gps_active, gps_active->editcurve, false);
       BKE_gpencil_stroke_geometry_update(gpd, gps_active);
       changed = true;
+    }
+
+    if (hit || whole) {
+      bGPDlayer *gpl_orig = (gpl->runtime.gpl_orig) ? gpl->runtime.gpl_orig : gpl;
+      bGPDframe *gpf_orig = (gpf_->runtime.gpf_orig) ? gpf_->runtime.gpf_orig : gpf_;
+      BKE_gpencil_tag_full_update(gpd, gpl_orig, gpf_orig, NULL);
     }
 
     /* Ensure that stroke selection is in sync with its points */
@@ -2170,12 +2232,14 @@ static int gpencil_generic_select_exec(bContext *C,
   else if (ob && ob->mode == OB_MODE_VERTEX_GPENCIL) {
     selectmode = gpencil_select_mode_from_vertex(ts->gpencil_selectmode_vertex);
   }
+  else if (ob && ob->mode == OB_MODE_PAINT_GPENCIL) {
+    selectmode = GP_SELECTMODE_STROKE;
+  }
   else {
     selectmode = ts->gpencil_selectmode_edit;
   }
 
-  const bool strokemode = ((selectmode == GP_SELECTMODE_STROKE) &&
-                           ((gpd->flag & GP_DATA_STROKE_PAINTMODE) == 0));
+  const bool strokemode = (selectmode == GP_SELECTMODE_STROKE);
   const bool segmentmode = ((selectmode == GP_SELECTMODE_SEGMENT) &&
                             ((gpd->flag & GP_DATA_STROKE_PAINTMODE) == 0));
 
@@ -2209,19 +2273,18 @@ static int gpencil_generic_select_exec(bContext *C,
                                             is_curve_edit);
   }
 
+#if 0
   /* if paint mode,delete selected points */
   if (GPENCIL_PAINT_MODE(gpd)) {
     gpencil_delete_selected_point_wrap(C);
     changed = true;
     DEG_id_tag_update(&gpd->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
   }
+#endif
 
   /* updates */
   if (changed) {
     DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
-
-    /* copy on write tag is needed, or else no refresh happens */
-    DEG_id_tag_update(&gpd->id, ID_RECALC_COPY_ON_WRITE);
 
     WM_event_add_notifier(C, NC_GPENCIL | NA_SELECTED, NULL);
     WM_event_add_notifier(C, NC_GEOM | ND_SELECT, NULL);
@@ -2237,12 +2300,19 @@ static int gpencil_generic_select_exec(bContext *C,
 
 static bool gpencil_test_box(ARegion *region,
                              const float diff_mat[4][4],
-                             const float pt[3],
+                             const float pt1[3],
+                             const float pt2[3],
                              GP_SelectUserData *user_data)
 {
-  int co[2] = {0};
-  if (gpencil_3d_point_to_screen_space(region, diff_mat, pt, co)) {
-    return BLI_rcti_isect_pt(&user_data->rect, co[0], co[1]);
+  int co1[2] = {0};
+  if (gpencil_3d_point_to_screen_space(region, diff_mat, pt1, co1)) {
+    if (pt2) {
+      int co2[2] = {0};
+      if (gpencil_3d_point_to_screen_space(region, diff_mat, pt2, co2)) {
+        return BLI_rcti_isect_segment(&user_data->rect, co1, co2);
+      }
+    }
+    return BLI_rcti_isect_pt(&user_data->rect, co1[0], co1[1]);
   }
   return false;
 }
@@ -2286,15 +2356,28 @@ void GPENCIL_OT_select_box(wmOperatorType *ot)
 
 static bool gpencil_test_lasso(ARegion *region,
                                const float diff_mat[4][4],
-                               const float pt[3],
+                               const float pt1[3],
+                               const float pt2[3],
                                GP_SelectUserData *user_data)
 {
-  int co[2] = {0};
-  if (gpencil_3d_point_to_screen_space(region, diff_mat, pt, co)) {
+  int co1[2] = {0};
+  if (gpencil_3d_point_to_screen_space(region, diff_mat, pt1, co1)) {
+    if (pt2) {
+      int co2[2] = {0};
+      if (gpencil_3d_point_to_screen_space(region, diff_mat, pt2, co2)) {
+        return BLI_lasso_is_edge_inside(user_data->lasso_coords,
+                                        user_data->lasso_coords_len,
+                                        co1[0],
+                                        co1[1],
+                                        co2[0],
+                                        co2[1],
+                                        INT_MAX);
+      }
+    }
     /* test if in lasso boundbox + within the lasso noose */
-    return (BLI_rcti_isect_pt(&user_data->rect, co[0], co[1]) &&
+    return (BLI_rcti_isect_pt(&user_data->rect, co1[0], co1[1]) &&
             BLI_lasso_is_point_inside(
-                user_data->lasso_coords, user_data->lasso_coords_len, co[0], co[1], INT_MAX));
+                user_data->lasso_coords, user_data->lasso_coords_len, co1[0], co1[1], INT_MAX));
   }
   return false;
 }
@@ -2346,6 +2429,32 @@ void GPENCIL_OT_select_lasso(wmOperatorType *ot)
 /** \name Mouse Pick Select Operator
  * \{ */
 
+static int gpencil_dist_point(ARegion *region,
+                              const float diff_mat[4][4],
+                              const float pt1[3],
+                              const float pt2[3],
+                              const int mval[2])
+{
+  float mvalf[2];
+  copy_v2fl_v2i(mvalf, mval);
+  int co1[2] = {0};
+  if (gpencil_3d_point_to_screen_space(region, diff_mat, pt1, co1)) {
+    if (pt2) {
+      int co2[2] = {0};
+      if (gpencil_3d_point_to_screen_space(region, diff_mat, pt2, co2)) {
+        float co1f[2], co2f[2];
+        copy_v2fl_v2i(co1f, co1);
+        copy_v2fl_v2i(co2f, co2);
+        float closest[2];
+        closest_to_line_segment_v2(closest, mvalf, co1f, co2f);
+        return len_manhattan_v2v2(mvalf, closest);
+      }
+    }
+    return len_manhattan_v2v2_int(mval, co1);
+  }
+  return -1;
+}
+
 static void gpencil_select_curve_point(bContext *C,
                                        const int mval[2],
                                        const int radius_squared,
@@ -2381,15 +2490,15 @@ static void gpencil_select_curve_point(bContext *C,
       for (int j = from; j < to; j++) {
         int screen_co[2];
         if (gpencil_3d_point_to_screen_space(region, gps_iter.diff_mat, bezt->vec[j], screen_co)) {
-          const int pt_distance = len_manhattan_v2v2_int(mval, screen_co);
+          const int pt_distance_sq = len_manhattan_v2v2_int(mval, screen_co);
 
-          if (pt_distance <= radius_squared && pt_distance < hit_distance) {
+          if (pt_distance_sq <= radius_squared && pt_distance_sq < hit_distance) {
             *r_gpl = gpl;
             *r_gps = gps;
             *r_gpc = gpc;
             *r_pt = gpc_pt;
             *handle = j;
-            hit_distance = pt_distance;
+            hit_distance = pt_distance_sq;
           }
         }
       }
@@ -2400,6 +2509,7 @@ static void gpencil_select_curve_point(bContext *C,
 
 static int gpencil_select_exec(bContext *C, wmOperator *op)
 {
+  ARegion *region = CTX_wm_region(C);
   ScrArea *area = CTX_wm_area(C);
   Object *ob = CTX_data_active_object(C);
   bGPdata *gpd = ED_gpencil_data_get_active(C);
@@ -2407,7 +2517,8 @@ static int gpencil_select_exec(bContext *C, wmOperator *op)
   const float scale = ts->gp_sculpt.isect_threshold;
   const bool is_curve_edit = (bool)GPENCIL_CURVE_EDIT_SESSIONS_ON(gpd);
 
-  /* "radius" is simply a threshold (screen space) to make it easier to test with a tolerance */
+  /* "radius" is simply a threshold (screen space) to make it easier to test with a tolerance
+   */
   const float radius = 0.4f * U.widget_unit;
   const int radius_squared = (int)(radius * radius);
 
@@ -2421,8 +2532,6 @@ static int gpencil_select_exec(bContext *C, wmOperator *op)
   int mval[2] = {0};
   /* get mouse location */
   RNA_int_get_array(op->ptr, "location", mval);
-
-  GP_SpaceConversion gsc = {NULL};
 
   bGPDlayer *hit_layer = NULL;
   bGPDstroke *hit_stroke = NULL;
@@ -2463,36 +2572,39 @@ static int gpencil_select_exec(bContext *C, wmOperator *op)
   }
 
   if (hit_curve == NULL) {
-    /* init space conversion stuff */
-    gpencil_point_conversion_init(C, &gsc);
-
     /* First Pass: Find stroke point which gets hit */
     GP_EVALUATED_STROKES_BEGIN (gpstroke_iter, C, gpl, gps) {
       bGPDstroke *gps_active = (gps->runtime.gps_orig) ? gps->runtime.gps_orig : gps;
-      bGPDspoint *pt;
-      int i;
-
+      const bool is_cyclic = ((gps_active->flag & GP_STROKE_CYCLIC) != 0);
       /* firstly, check for hit-point */
-      for (i = 0, pt = gps->points; i < gps->totpoints; i++, pt++) {
-        int xy[2];
+      for (int i = 0; i < gps->totpoints; i++) {
+        bGPDspoint *pt = &gps->points[i];
+        bGPDspoint *pt_active = (pt->runtime.pt_orig) ? pt->runtime.pt_orig : pt;
 
-        bGPDspoint pt2;
-        gpencil_point_to_parent_space(pt, gpstroke_iter.diff_mat, &pt2);
-        gpencil_point_to_xy(&gsc, gps_active, &pt2, &xy[0], &xy[1]);
+        int idx_next = (i + 1) % gps->totpoints;
+        bGPDspoint *pt_next = (whole && (idx_next != 0 || is_cyclic)) ? &gps->points[idx_next] :
+                                                                        NULL;
+        bGPDspoint *pt_next_active = (pt_next && pt_next->runtime.pt_orig) ?
+                                         pt_next->runtime.pt_orig :
+                                         pt_next;
 
-        /* do boundbox check first */
-        if (!ELEM(V2D_IS_CLIPPED, xy[0], xy[1])) {
-          const int pt_distance = len_manhattan_v2v2_int(mval, xy);
-
-          /* check if point is inside */
-          if (pt_distance <= radius_squared) {
-            /* only use this point if it is a better match than the current hit - T44685 */
-            if (pt_distance < hit_distance) {
-              hit_layer = gpl;
-              hit_stroke = gps_active;
-              hit_point = (pt->runtime.pt_orig) ? pt->runtime.pt_orig : pt;
-              hit_distance = pt_distance;
-            }
+        const int pt_distance_sq = gpencil_dist_point(region,
+                                                      gpstroke_iter.diff_mat,
+                                                      &pt_active->x,
+                                                      pt_next ? &pt_next_active->x : NULL,
+                                                      mval);
+        /* Distance must be positive. */
+        if (pt_distance_sq < 0) {
+          continue;
+        }
+        /* check if point is inside */
+        if (pt_distance_sq <= radius_squared) {
+          /* only use this point if it is a better match than the current hit - T44685 */
+          if (pt_distance_sq < hit_distance) {
+            hit_layer = gpl;
+            hit_stroke = gps_active;
+            hit_point = pt_active;
+            hit_distance = pt_distance_sq;
           }
         }
       }
@@ -2507,9 +2619,10 @@ static int gpencil_select_exec(bContext *C, wmOperator *op)
       /* since left mouse select change, deselect all if click outside any hit */
       deselect_all_selected(C);
 
+      gpencil_tag_editable_frames(gpd);
+
       /* copy on write tag is needed, or else no refresh happens */
       DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
-      DEG_id_tag_update(&gpd->id, ID_RECALC_COPY_ON_WRITE);
       WM_event_add_notifier(C, NC_GPENCIL | NA_SELECTED, NULL);
       WM_event_add_notifier(C, NC_GEOM | ND_SELECT, NULL);
 
@@ -2643,10 +2756,9 @@ static int gpencil_select_exec(bContext *C, wmOperator *op)
 
   /* updates */
   if (hit_curve_point != NULL || hit_point != NULL) {
-    DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
+    gpencil_tag_editable_frames(gpd);
 
-    /* copy on write tag is needed, or else no refresh happens */
-    DEG_id_tag_update(&gpd->id, ID_RECALC_COPY_ON_WRITE);
+    DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
 
     WM_event_add_notifier(C, NC_GPENCIL | NA_SELECTED, NULL);
     WM_event_add_notifier(C, NC_GEOM | ND_SELECT, NULL);

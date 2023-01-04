@@ -217,6 +217,8 @@ void SEQUENCER_OT_strip_transform_fit(struct wmOperatorType *ot);
 void SEQUENCER_OT_strip_color_tag_set(struct wmOperatorType *ot);
 void SEQUENCER_OT_cursor_set(struct wmOperatorType *ot);
 
+void SEQUENCER_OT_remove_scene_override(struct wmOperatorType *ot);
+
 /* sequencer_select.c */
 
 void SEQUENCER_OT_select_all(struct wmOperatorType *ot);

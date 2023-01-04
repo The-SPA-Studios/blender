@@ -26,6 +26,10 @@ typedef void (*wmGizmoGroupFnInvokePrepare)(const struct bContext *,
                                             struct wmGizmoGroup *,
                                             struct wmGizmo *,
                                             const struct wmEvent *);
+typedef void (*wmGizmoGroupFnExitCleanup)(const struct bContext *,
+                                          struct wmGizmoGroup *,
+                                          struct wmGizmo *,
+                                          bool);
 typedef struct wmKeyMap *(*wmGizmoGroupFnSetupKeymap)(const struct wmGizmoGroupType *,
                                                       struct wmKeyConfig *)ATTR_WARN_UNUSED_RESULT;
 typedef void (*wmGizmoGroupFnMsgBusSubscribe)(const struct bContext *,

@@ -23,6 +23,8 @@ set(INC
   ../../../../intern/eigen
   ../../../../intern/glew-mx
   ../../../../intern/guardedalloc
+  ../../../../extern/curve_fit_nd
+
   # RNA_prototypes.h
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
@@ -42,6 +44,8 @@ set(SRC
   curves_sculpt_slide.cc
   curves_sculpt_smooth.cc
   curves_sculpt_snake_hook.cc
+  gpencil_draw_stroke.cc
+  gpencil_paint_ops.cc
   paint_canvas.cc
   paint_cursor.c
   paint_curve.c
@@ -88,6 +92,7 @@ set(SRC
 
   curves_sculpt_intern.h
   curves_sculpt_intern.hh
+  gpencil_paint_intern.hh
   paint_intern.h
   sculpt_intern.h
 )
@@ -102,6 +107,7 @@ if(WITH_TBB)
     ${TBB_INCLUDE_DIRS}
   )
   add_definitions(-DWITH_TBB)
+
   if(WIN32)
     # TBB includes Windows.h which will define min/max macros
     # that will collide with the stl versions.

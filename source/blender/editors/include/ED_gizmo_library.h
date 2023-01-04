@@ -28,6 +28,7 @@ void ED_gizmotypes_preselect_3d(void);
 void ED_gizmotypes_primitive_3d(void);
 void ED_gizmotypes_blank_3d(void);
 void ED_gizmotypes_snap_3d(void);
+void ED_gizmotypes_plane3d(void);
 
 struct Object;
 struct bContext;

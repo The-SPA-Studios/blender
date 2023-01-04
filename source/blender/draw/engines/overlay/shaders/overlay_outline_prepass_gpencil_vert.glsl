@@ -48,6 +48,7 @@ void main()
                                col2,
                                fcol1,
                                vec4(drw_view.viewport_size, drw_view.viewport_size_inverse),
+                               gpFrameMatrix,
                                world_pos,
                                unused_N,
                                unused_color,

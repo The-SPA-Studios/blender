@@ -462,7 +462,7 @@ void ANIM_editkeyframes_refresh(bAnimContext *ac)
   int filter;
 
   /* filter animation data */
-  filter = ANIMFILTER_DATA_VISIBLE;
+  filter = ANIMFILTER_DATA_VISIBLE | ANIMFILTER_FCURVESONLY;
   ANIM_animdata_filter(ac, &anim_data, filter, ac->data, ac->datatype);
 
   /* Loop over F-Curves that are likely to have been edited, and tag them to

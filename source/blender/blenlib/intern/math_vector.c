@@ -773,6 +773,18 @@ void rotate_v2_v2fl(float r[2], const float p[2], const float angle)
   r[1] = si * p[0] + co * p[1];
 }
 
+void rotate_v2_fl(float r[2], const float angle)
+{
+  const float co = cosf(angle);
+  const float si = sinf(angle);
+
+  float tmp[2];
+  copy_v2_v2(tmp, r);
+
+  r[0] = co * tmp[0] - si * tmp[1];
+  r[1] = si * tmp[0] + co * tmp[1];
+}
+
 void rotate_normalized_v3_v3v3fl(float out[3],
                                  const float p[3],
                                  const float axis[3],

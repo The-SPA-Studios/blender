@@ -366,6 +366,20 @@ static void obmat_to_viewmat(RegionView3D *rv3d, Object *ob)
   rv3d->view = RV3D_VIEW_USER; /* don't show the grid */
 
   normalize_m4_m4(bmat, ob->obmat);
+
+  /* Apply view roll. */
+  const float eul[3] = {0, 0, -rv3d->rot_angle};
+  float rot[4][4];
+  eul_to_mat4(rot, eul);
+  mul_m4_m4_post(bmat, rot);
+
+  if (rv3d->rflag & RV3D_VIEW_MIRROR_X) {
+    float scale_mat[4][4];
+    float scale_vec[2] = {-1.0f, 1.0f};
+    scale_m4_v2(scale_mat, scale_vec);
+    mul_m4_m4_post(bmat, scale_mat);
+  }
+
   invert_m4_m4(rv3d->viewmat, bmat);
 
   /* view quat calculation, needed for add object */
@@ -396,7 +410,13 @@ void view3d_viewmatrix_set(Depsgraph *depsgraph,
       ED_view3d_lock(rv3d);
     }
 
+    /* Apply view roll. */
+    const float eul[3] = {0, 0, rv3d->rot_angle};
+    float rot[4][4];
+    eul_to_mat4(rot, eul);
     quat_to_mat4(rv3d->viewmat, rv3d->viewquat);
+    mul_m4_m4_pre(rv3d->viewmat, rot);
+
     if (rv3d->persp == RV3D_PERSP) {
       rv3d->viewmat[3][2] -= rv3d->dist;
     }
@@ -423,6 +443,13 @@ void view3d_viewmatrix_set(Depsgraph *depsgraph,
     }
     else {
       translate_m4(rv3d->viewmat, rv3d->ofs[0], rv3d->ofs[1], rv3d->ofs[2]);
+    }
+
+    if (rv3d->rflag & RV3D_VIEW_MIRROR_X) {
+      float scale_mat[4][4];
+      float scale_vec[2] = {-1.0f, 1.0f};
+      scale_m4_v2(scale_mat, scale_vec);
+      mul_m4_m4_pre(rv3d->viewmat, scale_mat);
     }
 
     /* lock offset */

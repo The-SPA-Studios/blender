@@ -560,8 +560,10 @@ static void action_listener(const wmSpaceTypeListenerParams *params)
           LISTBASE_FOREACH (ARegion *, region, &area->regionbase) {
             if (region->regiontype == RGN_TYPE_WINDOW) {
               Scene *scene = wmn->reference;
-              region->v2d.tot.xmin = (float)(scene->r.sfra - 4);
-              region->v2d.tot.xmax = (float)(scene->r.efra + 4);
+              if (scene != NULL) {
+                region->v2d.tot.xmin = (float)(scene->r.sfra - 4);
+                region->v2d.tot.xmax = (float)(scene->r.efra + 4);
+              }
               break;
             }
           }

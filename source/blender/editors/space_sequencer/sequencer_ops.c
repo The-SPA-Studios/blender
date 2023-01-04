@@ -66,6 +66,8 @@ void sequencer_operatortypes(void)
 
   WM_operatortype_append(SEQUENCER_OT_strip_color_tag_set);
   WM_operatortype_append(SEQUENCER_OT_cursor_set);
+  
+  WM_operatortype_append(SEQUENCER_OT_remove_scene_override);
 
   /* sequencer_select.c */
   WM_operatortype_append(SEQUENCER_OT_select_all);

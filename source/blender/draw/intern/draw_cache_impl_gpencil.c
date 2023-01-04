@@ -578,7 +578,9 @@ static void gpencil_sbuffer_stroke_ensure(bGPdata *gpd, bool do_stroke, bool do_
     const DRWContextState *draw_ctx = DRW_context_state_get();
     Scene *scene = draw_ctx->scene;
     ARegion *region = draw_ctx->region;
+    RegionView3D *rv3d = draw_ctx->rv3d;
     Object *ob = draw_ctx->obact;
+    bGPDlayer *gpl = BKE_gpencil_layer_active_get(gpd);
 
     BLI_assert(ob && (ob->type == OB_GPENCIL));
 
@@ -589,6 +591,10 @@ static void gpencil_sbuffer_stroke_ensure(bGPdata *gpd, bool do_stroke, bool do_
 
     for (int i = 0; i < vert_len; i++) {
       ED_gpencil_tpoint_to_point(region, origin, &tpoints[i], &gps->points[i]);
+      if ((ts->gpencil_v3d_align & (GP_PROJECT_DEPTH_VIEW | GP_PROJECT_DEPTH_STROKE)) == 0) {
+        ED_gpencil_project_point_to_plane(
+            scene, ob, gpl, rv3d, origin, ts->gp_sculpt.lock_axis - 1, &gps->points[i]);
+      }
       mul_m4_v3(ob->imat, &gps->points[i].x);
       bGPDspoint *pt = &gps->points[i];
       copy_v4_v4(pt->vert_color, tpoints[i].vert_color);

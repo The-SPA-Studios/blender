@@ -513,6 +513,7 @@ static ActKeyColumn *nalloc_ak_gpframe(void *data)
   /* store settings based on state of BezTriple */
   ak->cfra = gpf->framenum;
   ak->sel = (gpf->flag & GP_FRAME_SELECT) ? SELECT : 0;
+  ak->sel |= (gpf->flag & GP_FRAME_ONION_SKIN_TAG);
   ak->key_type = gpf->key_type;
 
   /* count keyframes in this column */
@@ -533,6 +534,10 @@ static void nupdate_ak_gpframe(ActKeyColumn *ak, void *data)
   /* set selection status and 'touched' status */
   if (gpf->flag & GP_FRAME_SELECT) {
     ak->sel = SELECT;
+  }
+
+  if (gpf->flag & GP_FRAME_ONION_SKIN_TAG) {
+    ak->sel |= GP_FRAME_ONION_SKIN_TAG;
   }
 
   /* count keyframes in this column */

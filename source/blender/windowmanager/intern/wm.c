@@ -583,6 +583,7 @@ void wm_close_and_free(bContext *C, wmWindowManager *wm)
 
   if (wm->message_bus != NULL) {
     WM_msgbus_destroy(wm->message_bus);
+    wm->message_bus = NULL;
   }
 
 #ifdef WITH_PYTHON

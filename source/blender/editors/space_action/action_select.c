@@ -29,6 +29,7 @@
 #include "BKE_context.h"
 #include "BKE_fcurve.h"
 #include "BKE_gpencil.h"
+#include "BKE_gpencil_update_cache.h"
 #include "BKE_nla.h"
 
 #include "UI_interface.h"
@@ -212,6 +213,55 @@ static bool actkeys_is_key_at_position(bAnimContext *ac, float region_x, float r
   return found;
 }
 
+static void actkeys_gpencil_select_key_at(bAnimListElem *ale, int frame, short mode)
+{
+  bGPDlayer *gpl = (bGPDlayer *)ale->data;
+  bGPDframe *gpf = BKE_gpencil_layer_frame_find(gpl, frame);
+  ED_gpencil_select_frame(gpl, gpf, mode);
+  BKE_gpencil_tag_light_update((bGPdata *)ale->id, gpl, gpf, NULL);
+}
+
+static void actkeys_gpencil_select_keys(bAnimListElem *ale, short mode)
+{
+  bGPDlayer *gpl = (bGPDlayer *)ale->data;
+  ED_gpencil_select_frames(gpl, mode);
+  LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+    BKE_gpencil_tag_light_update((bGPdata *)ale->id, gpl, gpf, NULL);
+  }
+}
+
+static void actkeys_gpencil_select_keys_box(bAnimListElem *ale, float min, float max, short mode)
+{
+  bGPDlayer *gpl = (bGPDlayer *)ale->data;
+  ED_gpencil_layer_frames_select_box(gpl, min, max, mode);
+  LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+    if (IN_RANGE(gpf->framenum, min, max)) {
+      BKE_gpencil_tag_light_update((bGPdata *)ale->id, gpl, gpf, NULL);
+    }
+  }
+}
+
+static void actkeys_gpencil_select_keys_region(bAnimListElem *ale,
+                                               KeyframeEditData *ked,
+                                               short tool,
+                                               short mode)
+{
+  bGPDlayer *gpl = (bGPDlayer *)ale->data;
+  LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+    if (ED_gpencil_layer_frame_select_region(ked, gpf, tool, mode)) {
+      BKE_gpencil_tag_light_update((bGPdata *)ale->id, gpl, gpf, NULL);
+    }
+  }
+}
+
+static void actkeys_gpencil_tag_key_at(bAnimListElem *ale, int selx, short mode)
+{
+  bGPDlayer *gpl = (bGPDlayer *)ale->data;
+  bGPDframe *gpf = BKE_gpencil_layer_frame_find(gpl, selx);
+  ED_gpencil_tag_frame(gpl, gpf, mode);
+  BKE_gpencil_tag_light_update((bGPdata *)ale->id, gpl, gpf, NULL);
+}
+
 /* ******************** Deselect All Operator ***************************** */
 /* This operator works in one of three ways:
  * 1) (de)select all (AKEY) - test if select all or deselect all
@@ -273,7 +323,7 @@ static void deselect_action_keys(bAnimContext *ac, short test, short sel)
   /* Now set the flags */
   for (ale = anim_data.first; ale; ale = ale->next) {
     if (ale->type == ANIMTYPE_GPLAYER) {
-      ED_gpencil_layer_frame_select_set(ale->data, sel);
+      actkeys_gpencil_select_keys(ale, sel);
       ale->update |= ANIM_UPDATE_DEPS;
     }
     else if (ale->type == ANIMTYPE_MASKLAYER) {
@@ -389,7 +439,7 @@ static void box_select_elem(
     }
 #endif
     case ANIMTYPE_GPLAYER: {
-      ED_gpencil_layer_frames_select_box(ale->data, xmin, xmax, sel_data->selectmode);
+      actkeys_gpencil_select_keys_box(ale, xmin, xmax, sel_data->selectmode);
       ale->update |= ANIM_UPDATE_DEPS;
       break;
     }
@@ -630,8 +680,8 @@ static void region_select_elem(RegionSelectData *sel_data, bAnimListElem *ale, b
     }
 #endif
     case ANIMTYPE_GPLAYER: {
-      ED_gpencil_layer_frames_select_region(
-          &sel_data->ked, ale->data, sel_data->mode, sel_data->selectmode);
+      actkeys_gpencil_select_keys_region(
+          ale, &sel_data->ked, sel_data->mode, sel_data->selectmode);
       ale->update |= ANIM_UPDATE_DEPS;
       break;
     }
@@ -951,7 +1001,7 @@ static void markers_selectkeys_between(bAnimContext *ac)
   for (ale = anim_data.first; ale; ale = ale->next) {
     switch (ale->type) {
       case ANIMTYPE_GPLAYER:
-        ED_gpencil_layer_frames_select_box(ale->data, min, max, SELECT_ADD);
+        actkeys_gpencil_select_keys_box(ale, min, max, SELECT_ADD);
         ale->update |= ANIM_UPDATE_DEPS;
         break;
 
@@ -1064,7 +1114,7 @@ static void columnselect_action_keys(bAnimContext *ac, short mode)
 
       /* select elements with frame number matching cfraelem */
       if (ale->type == ANIMTYPE_GPLAYER) {
-        ED_gpencil_select_frame(ale->data, ce->cfra, SELECT_ADD);
+        actkeys_gpencil_select_key_at(ale, ce->cfra, SELECT_ADD);
         ale->update |= ANIM_UPDATE_DEPS;
       }
       else if (ale->type == ANIMTYPE_MASKLAYER) {
@@ -1367,7 +1417,7 @@ static void actkeys_select_leftright(bAnimContext *ac, short leftright, short se
   for (ale = anim_data.first; ale; ale = ale->next) {
     switch (ale->type) {
       case ANIMTYPE_GPLAYER:
-        ED_gpencil_layer_frames_select_box(ale->data, ked.f1, ked.f2, select_mode);
+        actkeys_gpencil_select_keys_box(ale, ked.f1, ked.f2, select_mode);
         ale->update |= ANIM_UPDATE_DEPS;
         break;
 
@@ -1541,7 +1591,7 @@ static void actkeys_mselect_single(bAnimContext *ac,
 
   /* select the nominated keyframe on the given frame */
   if (ale->type == ANIMTYPE_GPLAYER) {
-    ED_gpencil_select_frame(ale->data, selx, select_mode);
+    actkeys_gpencil_select_key_at(ale, selx, select_mode);
     ale->update |= ANIM_UPDATE_DEPS;
   }
   else if (ale->type == ANIMTYPE_MASKLAYER) {
@@ -1558,7 +1608,7 @@ static void actkeys_mselect_single(bAnimContext *ac,
       /* Loop over all keys that are represented by this summary key. */
       LISTBASE_FOREACH (bAnimListElem *, ale2, &anim_data) {
         if (ale2->type == ANIMTYPE_GPLAYER) {
-          ED_gpencil_select_frame(ale2->data, selx, select_mode);
+          actkeys_gpencil_select_key_at(ale2, selx, select_mode);
           ale2->update |= ANIM_UPDATE_DEPS;
         }
         else if (ale2->type == ANIMTYPE_MASKLAYER) {
@@ -1603,7 +1653,7 @@ static void actkeys_mselect_column(bAnimContext *ac, short select_mode, float se
   for (ale = anim_data.first; ale; ale = ale->next) {
     /* select elements with frame number matching cfra */
     if (ale->type == ANIMTYPE_GPLAYER) {
-      ED_gpencil_select_frame(ale->data, selx, select_mode);
+      actkeys_gpencil_select_key_at(ale, selx, select_mode);
       ale->update |= ANIM_UPDATE_DEPS;
     }
     else if (ale->type == ANIMTYPE_MASKLAYER) {
@@ -1641,7 +1691,7 @@ static void actkeys_mselect_channel_only(bAnimContext *ac, bAnimListElem *ale, s
 
   /* select all keyframes in this channel */
   if (ale->type == ANIMTYPE_GPLAYER) {
-    ED_gpencil_select_frames(ale->data, select_mode);
+    actkeys_gpencil_select_keys(ale, select_mode);
     ale->update = ANIM_UPDATE_DEPS;
   }
   else if (ale->type == ANIMTYPE_MASKLAYER) {
@@ -1657,7 +1707,7 @@ static void actkeys_mselect_channel_only(bAnimContext *ac, bAnimListElem *ale, s
 
       LISTBASE_FOREACH (bAnimListElem *, ale2, &anim_data) {
         if (ale2->type == ANIMTYPE_GPLAYER) {
-          ED_gpencil_select_frames(ale2->data, select_mode);
+          actkeys_gpencil_select_keys(ale2, select_mode);
           ale2->update |= ANIM_UPDATE_DEPS;
         }
         else if (ale2->type == ANIMTYPE_MASKLAYER) {
@@ -1677,13 +1727,15 @@ static void actkeys_mselect_channel_only(bAnimContext *ac, bAnimListElem *ale, s
 
 /* ------------------- */
 
-static int mouse_action_keys(bAnimContext *ac,
+static int mouse_action_keys(bContext *C,
+                             bAnimContext *ac,
                              const int mval[2],
                              short select_mode,
                              const bool deselect_all,
                              const bool column,
                              const bool same_channel,
-                             bool wait_to_deselect_others)
+                             bool wait_to_deselect_others,
+                             bool gpencil_tag)
 {
   int filter = ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE | ANIMFILTER_LIST_CHANNELS;
 
@@ -1692,7 +1744,7 @@ static int mouse_action_keys(bAnimContext *ac,
   bool is_selected = false;
   float frame = 0.0f; /* frame of keyframe under mouse - NLA corrections not applied/included */
   float selx = 0.0f;  /* frame of keyframe under mouse */
-  int ret_value = OPERATOR_FINISHED;
+  int ret_value = OPERATOR_CANCELLED;
 
   actkeys_find_key_at_position(
       ac, filter, mval[0], mval[1], &ale, &selx, &frame, &found, &is_selected);
@@ -1737,10 +1789,7 @@ static int mouse_action_keys(bAnimContext *ac,
             ANIM_set_active_channel(ac, ac->data, ac->datatype, filter, fcu, ale->type);
           }
           else if (ale->type == ANIMTYPE_GPLAYER) {
-            bGPdata *gpd = (bGPdata *)ale->id;
-            bGPDlayer *gpl = ale->data;
-
-            ED_gpencil_set_active_channel(gpd, gpl);
+            ED_gpencil_set_active_channel(C, ac, ale, SELECT_REPLACE, filter);
           }
         }
       }
@@ -1750,10 +1799,7 @@ static int mouse_action_keys(bAnimContext *ac,
 
         /* Highlight GPencil Layer */
         if (ale != NULL && ale->data != NULL && ale->type == ANIMTYPE_GPLAYER) {
-          bGPdata *gpd = (bGPdata *)ale->id;
-          bGPDlayer *gpl = ale->data;
-
-          ED_gpencil_set_active_channel(gpd, gpl);
+          ED_gpencil_set_active_channel(C, ac, ale, SELECT_REPLACE, filter);
         }
       }
       else if (ac->datatype == ANIMCONT_MASK) {
@@ -1766,14 +1812,38 @@ static int mouse_action_keys(bAnimContext *ac,
           masklay->flag |= MASK_LAYERFLAG_SELECT;
         }
       }
+      ret_value = OPERATOR_FINISHED;
     }
   }
 
   /* only select keyframes if we clicked on a valid channel and hit something */
   if (ale != NULL) {
     if (found) {
+      if (gpencil_tag) {
+        if (ale->type == ANIMTYPE_GPLAYER) {
+          actkeys_gpencil_tag_key_at(ale, selx, SELECT_INVERT);
+          ale->update |= ANIM_UPDATE_DEPS;
+        }
+        else if (ale->type == ANIMTYPE_SUMMARY) {
+          ListBase anim_data_filter = {NULL, NULL};
+          filter = (ANIMFILTER_DATA_VISIBLE |
+                    ANIMFILTER_LIST_VISIBLE /*| ANIMFILTER_CURVESONLY */ | ANIMFILTER_NODUPLIS);
+          ANIM_animdata_filter(ac, &anim_data_filter, filter, ac->data, ac->datatype);
+
+          bAnimListElem *ale2;
+          for (ale2 = anim_data_filter.first; ale2; ale2 = ale2->next) {
+            if (ale2->type == ANIMTYPE_GPLAYER) {
+              actkeys_gpencil_tag_key_at(ale2, selx, SELECT_INVERT);
+              ale2->update |= ANIM_UPDATE_DEPS;
+            }
+          }
+
+          ANIM_animdata_update(ac, &anim_data_filter);
+          ANIM_animdata_freelist(&anim_data_filter);
+        }
+      }
       /* apply selection to keyframes */
-      if (column) {
+      else if (column) {
         /* select all keyframes in the same frame as the one we hit on the active channel
          * [T41077]: "frame" not "selx" here (i.e. no NLA corrections yet) as the code here
          *            does that itself again as it needs to work on multiple data-blocks.
@@ -1821,6 +1891,7 @@ static int actkeys_clickselect_exec(bContext *C, wmOperator *op)
   const short selectmode = RNA_boolean_get(op->ptr, "extend") ? SELECT_INVERT : SELECT_REPLACE;
   const bool deselect_all = RNA_boolean_get(op->ptr, "deselect_all");
   const bool wait_to_deselect_others = RNA_boolean_get(op->ptr, "wait_to_deselect_others");
+  const bool gpencil_tag = RNA_boolean_get(op->ptr, "gpencil_tag");
   int mval[2];
 
   /* column selection */
@@ -1831,8 +1902,15 @@ static int actkeys_clickselect_exec(bContext *C, wmOperator *op)
   mval[1] = RNA_int_get(op->ptr, "mouse_y");
 
   /* Select keyframe(s) based upon mouse position. */
-  ret_value = mouse_action_keys(
-      &ac, mval, selectmode, deselect_all, column, channel, wait_to_deselect_others);
+  ret_value = mouse_action_keys(C,
+                                &ac,
+                                mval,
+                                selectmode,
+                                deselect_all,
+                                column,
+                                channel,
+                                wait_to_deselect_others,
+                                gpencil_tag);
 
   /* set notifier that keyframe selection (and channels too) have changed */
   WM_event_add_notifier(C, NC_ANIMATION | ND_KEYFRAME | NA_SELECTED, NULL);
@@ -1893,6 +1971,13 @@ void ACTION_OT_clickselect(wmOperatorType *ot)
                          0,
                          "Only Channel",
                          "Select all the keyframes in the channel under the mouse");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+
+  prop = RNA_def_boolean(ot->srna,
+                         "gpencil_tag",
+                         0,
+                         "Tag GPencil Frame",
+                         "Tag the grease pencil frame under the mouse");
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 

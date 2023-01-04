@@ -16,6 +16,7 @@
 #include "intern/eval/deg_eval_runtime_backup_scene.h"
 #include "intern/eval/deg_eval_runtime_backup_sound.h"
 #include "intern/eval/deg_eval_runtime_backup_volume.h"
+#include "intern/eval/deg_eval_runtime_backup_gpencil.h"
 
 namespace blender::deg {
 

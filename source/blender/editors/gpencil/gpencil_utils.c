@@ -44,6 +44,7 @@
 #include "BKE_gpencil.h"
 #include "BKE_gpencil_curve.h"
 #include "BKE_gpencil_geom.h"
+#include "BKE_gpencil_update_cache.h"
 #include "BKE_main.h"
 #include "BKE_material.h"
 #include "BKE_object.h"
@@ -1996,9 +1997,14 @@ void ED_gpencil_setup_modes(bContext *C, bGPdata *gpd, int newmode)
       gpd->flag &= ~GP_DATA_STROKE_SCULPTMODE;
       gpd->flag &= ~GP_DATA_STROKE_WEIGHTMODE;
       gpd->flag &= ~GP_DATA_STROKE_VERTEXMODE;
+      /* Going to object mode should do a full copy-on-write. */
+      BKE_gpencil_tag_full_update(gpd, NULL, NULL, NULL);
       ED_gpencil_toggle_brush_cursor(C, false, NULL);
       break;
   }
+
+  /* Flag on the gpd changed, so tag using light update. */
+  BKE_gpencil_tag_light_update(gpd, NULL, NULL, NULL);
 }
 
 /**

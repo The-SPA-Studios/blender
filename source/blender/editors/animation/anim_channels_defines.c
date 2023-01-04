@@ -3127,6 +3127,22 @@ static int acf_dsgpencil_icon(bAnimListElem *UNUSED(ale))
   return ICON_OUTLINER_DATA_GREASEPENCIL;
 }
 
+static bool acf_dsgpencil_setting_valid(bAnimContext *ac,
+                                        bAnimListElem *ale,
+                                        eAnimChannel_Settings setting)
+{
+  switch (setting) {
+    case ACHANNEL_SETTING_MUTE:
+      return ((ac) && (ac->spacetype == SPACE_NLA));
+    case ACHANNEL_SETTING_EXPAND:
+    case ACHANNEL_SETTING_ALWAYS_VISIBLE:
+      return true;
+
+    default:
+      return false;
+  }
+}
+
 /* Get the appropriate flag(s) for the setting when it is valid. */
 static int acf_dsgpencil_setting_flag(bAnimContext *UNUSED(ac),
                                       eAnimChannel_Settings setting,
@@ -3145,10 +3161,6 @@ static int acf_dsgpencil_setting_flag(bAnimContext *UNUSED(ac),
     case ACHANNEL_SETTING_VISIBLE: /* visible (only in Graph Editor) */
       *neg = true;
       return ADT_CURVES_NOT_VISIBLE;
-
-    case ACHANNEL_SETTING_SELECT: /* selected */
-      return ADT_UI_SELECTED;
-
     default: /* unsupported */
       return 0;
   }
@@ -3195,9 +3207,9 @@ static bAnimChannelType ACF_DSGPENCIL = {
     acf_generic_idblock_name_prop, /* name prop */
     acf_dsgpencil_icon,            /* icon */
 
-    acf_generic_dataexpand_setting_valid, /* has setting */
-    acf_dsgpencil_setting_flag,           /* flag for setting */
-    acf_dsgpencil_setting_ptr,            /* pointer for setting */
+    acf_dsgpencil_setting_valid, /* has setting */
+    acf_dsgpencil_setting_flag,  /* flag for setting */
+    acf_dsgpencil_setting_ptr,   /* pointer for setting */
 };
 
 /* World Expander  ------------------------------------------- */

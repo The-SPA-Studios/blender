@@ -31,6 +31,7 @@
 #include "BKE_fcurve.h"
 #include "BKE_global.h"
 #include "BKE_gpencil.h"
+#include "BKE_gpencil_update_cache.h"
 #include "BKE_lib_id.h"
 #include "BKE_mask.h"
 #include "BKE_nla.h"
@@ -45,6 +46,7 @@
 
 #include "ED_anim_api.h"
 #include "ED_armature.h"
+#include "ED_gpencil.h"
 #include "ED_keyframes_edit.h" /* XXX move the select modes out of there! */
 #include "ED_object.h"
 #include "ED_screen.h"
@@ -66,6 +68,8 @@ void ANIM_set_active_channel(bAnimContext *ac,
                              eAnim_ChannelType channel_type)
 {
   /* TODO: extend for animdata types. */
+  ViewLayer *view_layer = ac->view_layer;
+  Base *base = BASACT(view_layer);
 
   ListBase anim_data = {NULL, NULL};
   bAnimListElem *ale;
@@ -136,7 +140,11 @@ void ANIM_set_active_channel(bAnimContext *ac,
       case ANIMTYPE_GPLAYER: {
         bGPDlayer *gpl = (bGPDlayer *)ale->data;
 
-        ACHANNEL_SET_FLAG(gpl, ACHANNEL_SETFLAG_CLEAR, GP_LAYER_ACTIVE);
+        /* Only clear the active layer flags on the current active object. */
+        if (((ac->ads->flag & ADS_FLAG_SYNC_SELECTION) != 0) && (ale->base == base)) {
+          ACHANNEL_SET_FLAG(gpl, ACHANNEL_SETFLAG_CLEAR, GP_LAYER_ACTIVE);
+          BKE_gpencil_tag_light_update((bGPdata *)ale->id, gpl, NULL, NULL);
+        }
         break;
       }
     }
@@ -435,6 +443,7 @@ static void anim_channels_select_set(bAnimContext *ac,
         bGPDlayer *gpl = (bGPDlayer *)ale->data;
 
         ACHANNEL_SET_FLAG(gpl, sel, GP_LAYER_SELECT);
+        BKE_gpencil_tag_light_update((bGPdata *)ale->id, gpl, NULL, NULL);
         break;
       }
       case ANIMTYPE_MASKLAYER: {
@@ -3190,31 +3199,7 @@ static int click_select_channel_gplayer(bContext *C,
                                         const short /* eEditKeyframes_Select or -1 */ selectmode,
                                         const int filter)
 {
-  bGPdata *gpd = (bGPdata *)ale->id;
-  bGPDlayer *gpl = (bGPDlayer *)ale->data;
-
-  /* select/deselect */
-  if (selectmode == SELECT_INVERT) {
-    /* invert selection status of this layer only */
-    gpl->flag ^= GP_LAYER_SELECT;
-  }
-  else {
-    /* select layer by itself */
-    ANIM_anim_channels_select_set(ac, ACHANNEL_SETFLAG_CLEAR);
-    gpl->flag |= GP_LAYER_SELECT;
-  }
-
-  /* change active layer, if this is selected (since we must always have an active layer) */
-  if (gpl->flag & GP_LAYER_SELECT) {
-    ANIM_set_active_channel(ac, ac->data, ac->datatype, filter, gpl, ANIMTYPE_GPLAYER);
-    /* update other layer status */
-    BKE_gpencil_layer_active_set(gpd, gpl);
-    BKE_gpencil_layer_autolock_set(gpd, false);
-    DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
-  }
-
-  /* Grease Pencil updates */
-  WM_event_add_notifier(C, NC_GPENCIL | ND_DATA | NA_EDITED | ND_SPACE_PROPERTIES, NULL);
+  ED_gpencil_set_active_channel(C, ac, ale, selectmode, filter);
   return (ND_ANIMCHAN | NA_EDITED); /* Animation Editors updates */
 }
 

@@ -169,6 +169,7 @@ extern const UndoType *BKE_UNDOSYS_TYPE_PAINTCURVE;
 extern const UndoType *BKE_UNDOSYS_TYPE_PARTICLE;
 extern const UndoType *BKE_UNDOSYS_TYPE_SCULPT;
 extern const UndoType *BKE_UNDOSYS_TYPE_TEXT;
+extern const UndoType *BKE_UNDOSYS_TYPE_GPENCIL;
 
 /** \} */
 

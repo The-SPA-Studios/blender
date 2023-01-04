@@ -16,17 +16,21 @@
 #include "BLI_blenlib.h"
 #include "BLI_utildefines.h"
 
+#include "DNA_anim_types.h"
 #include "DNA_gpencil_types.h"
 #include "DNA_scene_types.h"
 
+#include "BKE_context.h"
 #include "BKE_fcurve.h"
 #include "BKE_gpencil.h"
+#include "BKE_gpencil_update_cache.h"
 #include "BKE_report.h"
 
 #include "ED_anim_api.h"
 #include "ED_gpencil.h"
 #include "ED_keyframes_edit.h"
 #include "ED_markers.h"
+#include "ED_object.h"
 
 #include "WM_api.h"
 
@@ -141,29 +145,58 @@ void ED_gpencil_select_frames(bGPDlayer *gpl, short select_mode)
   }
 }
 
-void ED_gpencil_layer_frame_select_set(bGPDlayer *gpl, short mode)
+void ED_gpencil_select_frame(bGPDlayer *gpl, bGPDframe *gpf, short select_mode)
+{
+  if (gpl == NULL) {
+    return;
+  }
+
+  if (gpf) {
+    gpencil_frame_select(gpf, select_mode);
+  }
+}
+
+void ED_gpencil_tag_frames(bGPDlayer *gpl, short tag_mode)
 {
   /* error checking */
   if (gpl == NULL) {
     return;
   }
 
-  /* now call the standard function */
-  ED_gpencil_select_frames(gpl, mode);
+  /* handle according to mode */
+  LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+    switch (tag_mode) {
+      case SELECT_ADD:
+        gpf->flag |= GP_FRAME_ONION_SKIN_TAG;
+        break;
+      case SELECT_SUBTRACT:
+        gpf->flag &= ~GP_FRAME_ONION_SKIN_TAG;
+        break;
+      case SELECT_INVERT:
+        gpf->flag ^= GP_FRAME_ONION_SKIN_TAG;
+        break;
+    }
+  }
 }
 
-void ED_gpencil_select_frame(bGPDlayer *gpl, int selx, short select_mode)
+void ED_gpencil_tag_frame(bGPDlayer *gpl, bGPDframe *gpf, short tag_mode)
 {
-  bGPDframe *gpf;
-
   if (gpl == NULL) {
     return;
   }
 
-  gpf = BKE_gpencil_layer_frame_find(gpl, selx);
-
-  if (gpf) {
-    gpencil_frame_select(gpf, select_mode);
+  if (gpf != NULL) {
+    switch (tag_mode) {
+      case SELECT_ADD:
+        gpf->flag |= GP_FRAME_ONION_SKIN_TAG;
+        break;
+      case SELECT_SUBTRACT:
+        gpf->flag &= ~GP_FRAME_ONION_SKIN_TAG;
+        break;
+      case SELECT_INVERT:
+        gpf->flag ^= GP_FRAME_ONION_SKIN_TAG;
+        break;
+    }
   }
 }
 
@@ -181,6 +214,36 @@ void ED_gpencil_layer_frames_select_box(bGPDlayer *gpl, float min, float max, sh
   }
 }
 
+bool ED_gpencil_layer_frame_select_region(KeyframeEditData *ked,
+                                          bGPDframe *gpf,
+                                          short tool,
+                                          short select_mode)
+{
+  /* construct a dummy point coordinate to do this testing with */
+  float pt[2] = {0};
+
+  pt[0] = gpf->framenum;
+  pt[1] = ked->channel_y;
+
+  /* check the necessary regions */
+  if (tool == BEZT_OK_CHANNEL_LASSO) {
+    /* Lasso */
+    if (keyframe_region_lasso_test(ked->data, pt)) {
+      gpencil_frame_select(gpf, select_mode);
+      return true;
+    }
+  }
+  else if (tool == BEZT_OK_CHANNEL_CIRCLE) {
+    /* Circle */
+    if (keyframe_region_circle_test(ked->data, pt)) {
+      gpencil_frame_select(gpf, select_mode);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void ED_gpencil_layer_frames_select_region(KeyframeEditData *ked,
                                            bGPDlayer *gpl,
                                            short tool,
@@ -192,38 +255,66 @@ void ED_gpencil_layer_frames_select_region(KeyframeEditData *ked,
 
   /* only select frames which are within the region */
   LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
-    /* construct a dummy point coordinate to do this testing with */
-    float pt[2] = {0};
-
-    pt[0] = gpf->framenum;
-    pt[1] = ked->channel_y;
-
-    /* check the necessary regions */
-    if (tool == BEZT_OK_CHANNEL_LASSO) {
-      /* Lasso */
-      if (keyframe_region_lasso_test(ked->data, pt)) {
-        gpencil_frame_select(gpf, select_mode);
-      }
-    }
-    else if (tool == BEZT_OK_CHANNEL_CIRCLE) {
-      /* Circle */
-      if (keyframe_region_circle_test(ked->data, pt)) {
-        gpencil_frame_select(gpf, select_mode);
-      }
-    }
+    ED_gpencil_layer_frame_select_region(ked, gpf, tool, select_mode);
   }
 }
 
-void ED_gpencil_set_active_channel(bGPdata *gpd, bGPDlayer *gpl)
+void ED_gpencil_set_active_channel(
+    bContext *C, bAnimContext *ac, bAnimListElem *ale, const short selectmode, int filter)
 {
-  gpl->flag |= GP_LAYER_SELECT;
+  bDopeSheet *ads = ac->ads;
+  ViewLayer *view_layer = ac->view_layer;
+  Base *base = ale->base;
 
-  /* Update other layer status. */
-  if (BKE_gpencil_layer_active_get(gpd) != gpl) {
+  bGPdata *gpd = (bGPdata *)ale->id;
+  bGPDlayer *gpl = (bGPDlayer *)ale->data;
+
+  const bool sync_object_selection = ((ads->flag & ADS_FLAG_SYNC_SELECTION) != 0) &&
+                                     (BASACT(view_layer) != base);
+
+  /* select/deselect */
+  if (selectmode == SELECT_INVERT) {
+    /* invert selection status of this layer only */
+    gpl->flag ^= GP_LAYER_SELECT;
+    if (sync_object_selection) {
+      ED_object_base_select(base, BA_INVERT);
+    }
+  }
+  else {
+    if (sync_object_selection) {
+      Base *b;
+      /* deselect all */
+      for (b = view_layer->object_bases.first; b; b = b->next) {
+        ED_object_base_select(b, BA_DESELECT);
+        if (b->object->adt) {
+          b->object->adt->flag &= ~(ADT_UI_SELECTED | ADT_UI_ACTIVE);
+        }
+      }
+      /* select object now */
+      ED_object_base_select(base, BA_SELECT);
+    }
+
+    /* select layer by itself */
+    ANIM_anim_channels_select_set(ac, ACHANNEL_SETFLAG_CLEAR);
+    gpl->flag |= GP_LAYER_SELECT;
+  }
+
+  if (sync_object_selection) {
+    ED_object_base_activate_with_mode_exit_if_needed(C, base);
+  }
+
+  /* change active layer, if this is selected (since we must always have an active layer) */
+  if (gpl->flag & GP_LAYER_SELECT) {
+    ANIM_set_active_channel(ac, ac->data, ac->datatype, filter, gpl, ANIMTYPE_GPLAYER);
+    /* update other layer status */
     BKE_gpencil_layer_active_set(gpd, gpl);
     BKE_gpencil_layer_autolock_set(gpd, false);
-    WM_main_add_notifier(NC_GPENCIL | ND_DATA | NA_EDITED, NULL);
   }
+
+  BKE_gpencil_tag_light_update(gpd, gpl, NULL, NULL);
+
+  /* Grease Pencil updates */
+  WM_event_add_notifier(C, NC_GPENCIL | ND_DATA | NA_EDITED | ND_SPACE_PROPERTIES, NULL);
 }
 
 /* ***************************************** */

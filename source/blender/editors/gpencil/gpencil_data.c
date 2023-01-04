@@ -43,6 +43,7 @@
 #include "BKE_fcurve_driver.h"
 #include "BKE_gpencil.h"
 #include "BKE_gpencil_modifier.h"
+#include "BKE_gpencil_update_cache.h"
 #include "BKE_lib_id.h"
 #include "BKE_main.h"
 #include "BKE_material.h"
@@ -3891,4 +3892,80 @@ void GPENCIL_OT_layer_mask_move(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 
   ot->prop = RNA_def_enum(ot->srna, "type", slot_move, 0, "Type", "");
+}
+
+/* ********************* Shift & trace ************************** */
+
+enum {
+  GP_FRAME_RESET_ALL = 0,
+  GP_FRAME_RESET_ACTIVE,
+  GP_FRAME_RESET_SELECTED,
+};
+
+static int gpencil_reset_frame_transforms_exec(bContext *C, wmOperator *op)
+{
+  Scene *scene = CTX_data_scene(C);
+  ToolSettings *ts = scene->toolsettings;
+  bGPdata *gpd = ED_gpencil_data_get_active(C);
+  const int type = RNA_enum_get(op->ptr, "type");
+  const bool use_current_frame = ts->gp_frame_offset.use_current_frame;
+  const int frame = use_current_frame ? scene->r.cfra : ts->gp_frame_offset.custom_frame;
+
+  bool changed = false;
+  LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
+    if (!BKE_gpencil_layer_is_editable(gpl)) {
+      continue;
+    }
+
+    if (type == GP_FRAME_RESET_ACTIVE) {
+      bGPDframe *gpf = BKE_gpencil_layer_frame_find_prev(gpl, frame);
+      if (gpf == NULL) {
+        continue;
+      }
+      BKE_gpencil_frame_reset_transformation(gpf);
+      BKE_gpencil_tag_full_update(gpd, gpl, gpf, NULL);
+      changed = true;
+    }
+    else {
+      LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+        if (type == GP_FRAME_RESET_ALL ||
+            (type == GP_FRAME_RESET_SELECTED && (gpf->flag & GP_FRAME_SELECT))) {
+          BKE_gpencil_frame_reset_transformation(gpf);
+          BKE_gpencil_tag_full_update(gpd, gpl, gpf, NULL);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  if (changed) {
+    DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
+    WM_event_add_notifier(C, NC_GPENCIL | ND_DATA | NA_EDITED, NULL);
+  }
+
+  return OPERATOR_FINISHED;
+}
+
+void GPENCIL_OT_reset_frame_transforms(wmOperatorType *ot)
+{
+  static const EnumPropertyItem reset_type[] = {
+      {GP_FRAME_RESET_ALL, "ALL", 0, "All", ""},
+      {GP_FRAME_RESET_ACTIVE, "ACTIVE", 0, "Active", ""},
+      {GP_FRAME_RESET_SELECTED, "SELECTED", 0, "Selected", ""},
+      {0, NULL, 0, NULL, NULL},
+  };
+
+  /* identifiers */
+  ot->name = "Reset Frame Transforms";
+  ot->idname = "GPENCIL_OT_reset_frame_transforms";
+  ot->description = "Resets the transforms on grease pencil frames depending on the type option";
+
+  /* api callbacks */
+  ot->exec = gpencil_reset_frame_transforms_exec;
+  ot->poll = gpencil_active_layer_poll;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+  ot->prop = RNA_def_enum(ot->srna, "type", reset_type, 0, "Type", "");
 }

@@ -128,6 +128,7 @@ void BKE_screen_foreach_id_screen_area(LibraryForeachIDData *data, ScrArea *area
       case SPACE_SEQ: {
         SpaceSeq *sseq = (SpaceSeq *)sl;
         BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, sseq->gpd, IDWALK_CB_USER);
+        BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, sseq->scene_override, IDWALK_CB_USER_ONE);
         break;
       }
       case SPACE_NLA: {
@@ -1842,6 +1843,8 @@ void BKE_screen_area_blend_read_lib(BlendLibReader *reader, ID *parent_id, ScrAr
          * so fingers crossed this works fine!
          */
         BLO_read_id_address(reader, parent_id->lib, &sseq->gpd);
+
+        BLO_read_id_address(reader, parent_id->lib, &sseq->scene_override);
         break;
       }
       case SPACE_NLA: {

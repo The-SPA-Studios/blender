@@ -381,12 +381,27 @@ static void rna_def_dopesheet(BlenderRNA *brna)
   RNA_def_property_ui_icon(prop, ICON_DISCLOSURE_TRI_RIGHT, 1);
   RNA_def_property_update(prop, NC_ANIMATION | ND_ANIMCHAN, NULL);
 
+  /* Sync selection setting. */
+  prop = RNA_def_property(srna, "sync_selection", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "flag", ADS_FLAG_SYNC_SELECTION);
+  RNA_def_property_ui_text(
+      prop, "Sync Selection", "Sync the selection of channels with their corresponding objects");
+  RNA_def_property_ui_icon(prop, ICON_UV_SYNC_SELECT, 0);
+  RNA_def_property_update(prop, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, NULL);
+
   /* General Filtering Settings */
   prop = RNA_def_property(srna, "show_only_selected", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, NULL, "filterflag", ADS_FILTER_ONLYSEL);
   RNA_def_property_ui_text(
       prop, "Only Show Selected", "Only include channels relating to selected objects and data");
   RNA_def_property_ui_icon(prop, ICON_RESTRICT_SELECT_OFF, 0);
+  RNA_def_property_update(prop, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, NULL);
+
+  prop = RNA_def_property(srna, "show_active_object", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "filterflag", ADS_FILTER_INCL_OBACT);
+  RNA_def_property_ui_text(
+      prop, "Show Active Object", "Show active object even if not selected");
+  RNA_def_property_ui_icon(prop, ICON_OBJECT_DATA, 0);
   RNA_def_property_update(prop, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, NULL);
 
   prop = RNA_def_property(srna, "show_hidden", PROP_BOOLEAN, PROP_NONE);

@@ -563,6 +563,8 @@ Brush *BKE_brush_add_gpencil(Main *bmain, ToolSettings *ts, const char *name, eO
   BKE_paint_brush_set(paint, brush);
   id_us_min(&brush->id);
 
+  /* Grease pencil does not make use of the brush->flag but it can interfere, so we set it to 0.*/
+  brush->flag = 0;
   brush->size = 3;
 
   /* grease pencil basic settings */
@@ -670,7 +672,7 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
 {
 #define SMOOTH_STROKE_RADIUS 40
 #define SMOOTH_STROKE_FACTOR 0.9f
-#define ACTIVE_SMOOTH 0.35f
+#define ACTIVE_SMOOTH 0.5f
 
   CurveMapping *custom_curve = nullptr;
 
@@ -679,6 +681,9 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
     PRESET_MATERIAL_NONE = 0,
     PRESET_MATERIAL_DOT_STROKE,
   } material_preset = PRESET_MATERIAL_NONE;
+
+  /* Grease pencil does not make use of the brush->flag but it can interfere, so we set it to 0.*/
+  brush->flag = 0;
 
   /* Set general defaults at brush level. */
   brush->smooth_stroke_radius = SMOOTH_STROKE_RADIUS;
@@ -705,6 +710,8 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
   brush->gpencil_settings->vertex_mode = GPPAINT_MODE_BOTH;
   brush->gpencil_settings->vertex_factor = 1.0f;
 
+  brush->gpencil_settings->input_samples = 0;
+
   switch (type) {
     case GP_BRUSH_PRESET_AIRBRUSH: {
       brush->size = 300.0f;
@@ -712,13 +719,25 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
 
       brush->gpencil_settings->draw_strength = 0.4f;
       brush->gpencil_settings->flag |= GP_BRUSH_USE_STRENGTH_PRESSURE;
+      
+      /* Spacing. */
+      brush->gpencil_settings->sample_mode = GP_BRUSH_SAMPLE_FIXED;
+      brush->gpencil_settings->sample_distance = 0.1f;
 
-      brush->gpencil_settings->input_samples = 10;
-      brush->gpencil_settings->active_smooth = ACTIVE_SMOOTH;
-      brush->gpencil_settings->draw_angle = 0.0f;
-      brush->gpencil_settings->draw_angle_factor = 0.0f;
+      /* Active smoothing. */
+      brush->gpencil_settings->flag |= GP_BRUSH_USE_ACTIVE_SMOOTHING;
+      brush->gpencil_settings->active_smooth = 0.5f;
+      brush->gpencil_settings->draw_smoothlvl = 2;
+
+      /* Advanced. */
       brush->gpencil_settings->hardeness = 0.9f;
       copy_v2_fl(brush->gpencil_settings->aspect_ratio, 1.0f);
+      brush->gpencil_settings->draw_angle = 0.0f;
+      brush->gpencil_settings->draw_angle_factor = 0.0f;
+
+      brush->gpencil_settings->draw_random_press = 0.0f;
+      brush->gpencil_settings->draw_jitter = 0.0f;
+      brush->gpencil_settings->flag |= GP_BRUSH_USE_JITTER_PRESSURE;
 
       brush->gpencil_tool = GPAINT_TOOL_DRAW;
       brush->gpencil_settings->icon_id = GP_BRUSH_ICON_AIRBRUSH;
@@ -730,24 +749,26 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
       break;
     }
     case GP_BRUSH_PRESET_INK_PEN: {
-
       brush->size = 60.0f;
       brush->gpencil_settings->flag |= GP_BRUSH_USE_PRESSURE;
 
       brush->gpencil_settings->draw_strength = 1.0f;
 
-      brush->gpencil_settings->input_samples = 10;
-      brush->gpencil_settings->active_smooth = ACTIVE_SMOOTH;
-      brush->gpencil_settings->draw_angle = 0.0f;
-      brush->gpencil_settings->draw_angle_factor = 0.0f;
+      /* Spacing. */
+      brush->gpencil_settings->sample_mode = GP_BRUSH_SAMPLE_ADAPTIVE;
+      brush->gpencil_settings->input_samples = 2;
+      brush->gpencil_settings->simplify_f = 0.1f;
+
+      /* Active smoothing. */
+      brush->gpencil_settings->flag |= GP_BRUSH_USE_ACTIVE_SMOOTHING;
+      brush->gpencil_settings->active_smooth = 0.5f;
+      brush->gpencil_settings->draw_smoothlvl = 2;
+
+      /* Advanced. */
       brush->gpencil_settings->hardeness = 1.0f;
       copy_v2_fl(brush->gpencil_settings->aspect_ratio, 1.0f);
-
-      brush->gpencil_settings->flag |= GP_BRUSH_GROUP_SETTINGS;
-      brush->gpencil_settings->draw_smoothfac = 0.1f;
-      brush->gpencil_settings->draw_smoothlvl = 1;
-      brush->gpencil_settings->draw_subdivide = 0;
-      brush->gpencil_settings->simplify_f = 0.002f;
+      brush->gpencil_settings->draw_angle = 0.0f;
+      brush->gpencil_settings->draw_angle_factor = 0.0f;
 
       brush->gpencil_settings->draw_random_press = 0.0f;
       brush->gpencil_settings->draw_jitter = 0.0f;
@@ -771,18 +792,23 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
 
       brush->gpencil_settings->draw_strength = 1.0f;
 
-      brush->gpencil_settings->input_samples = 10;
-      brush->gpencil_settings->active_smooth = ACTIVE_SMOOTH;
-      brush->gpencil_settings->draw_angle = 0.0f;
-      brush->gpencil_settings->draw_angle_factor = 0.0f;
+      /* Spacing. */
+      brush->gpencil_settings->sample_mode = GP_BRUSH_SAMPLE_ADAPTIVE;
+      brush->gpencil_settings->input_samples = 2;
+      brush->gpencil_settings->simplify_f = 0.1f;
+
+      /* Active smoothing. */
+      brush->gpencil_settings->flag |= GP_BRUSH_USE_ACTIVE_SMOOTHING;
+      brush->gpencil_settings->active_smooth = 0.6f;
+      brush->gpencil_settings->draw_smoothlvl = 2;
+
+      /* Advanced. */
       brush->gpencil_settings->hardeness = 1.0f;
       copy_v2_fl(brush->gpencil_settings->aspect_ratio, 1.0f);
+      brush->gpencil_settings->draw_angle = 0.0f;
+      brush->gpencil_settings->draw_angle_factor = 0.0f;
 
       brush->gpencil_settings->flag &= ~GP_BRUSH_GROUP_SETTINGS;
-      brush->gpencil_settings->draw_smoothfac = 0.0f;
-      brush->gpencil_settings->draw_smoothlvl = 2;
-      brush->gpencil_settings->draw_subdivide = 0;
-      brush->gpencil_settings->simplify_f = 0.000f;
 
       brush->gpencil_settings->flag |= GP_BRUSH_GROUP_RANDOM;
       brush->gpencil_settings->draw_random_press = 0.6f;
@@ -808,18 +834,21 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
 
       brush->gpencil_settings->draw_strength = 0.3f;
 
-      brush->gpencil_settings->input_samples = 10;
-      brush->gpencil_settings->active_smooth = ACTIVE_SMOOTH;
-      brush->gpencil_settings->draw_angle = 0.0f;
-      brush->gpencil_settings->draw_angle_factor = 0.0f;
+      /* Spacing. */
+      brush->gpencil_settings->sample_mode = GP_BRUSH_SAMPLE_DEFAULT;
+      brush->gpencil_settings->input_samples = 2;
+      brush->gpencil_settings->simplify_f = 0.1f;
+
+      /* Active smoothing. */
+      brush->gpencil_settings->flag |= GP_BRUSH_USE_ACTIVE_SMOOTHING;
+      brush->gpencil_settings->active_smooth = 0.5f;
+      brush->gpencil_settings->draw_smoothlvl = 2;
+
+      /* Advanced. */
       brush->gpencil_settings->hardeness = 1.0f;
       copy_v2_fl(brush->gpencil_settings->aspect_ratio, 1.0f);
-
-      brush->gpencil_settings->flag |= GP_BRUSH_GROUP_SETTINGS;
-      brush->gpencil_settings->draw_smoothfac = 0.1f;
-      brush->gpencil_settings->draw_smoothlvl = 1;
-      brush->gpencil_settings->draw_subdivide = 0;
-      brush->gpencil_settings->simplify_f = 0.002f;
+      brush->gpencil_settings->draw_angle = 0.0f;
+      brush->gpencil_settings->draw_angle_factor = 0.0f;
 
       brush->gpencil_settings->flag &= ~GP_BRUSH_GROUP_RANDOM;
       brush->gpencil_settings->draw_random_press = 0.0f;
@@ -845,18 +874,21 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
 
       brush->gpencil_settings->draw_strength = 1.0f;
 
-      brush->gpencil_settings->input_samples = 10;
-      brush->gpencil_settings->active_smooth = 0.3f;
-      brush->gpencil_settings->draw_angle = DEG2RAD(35.0f);
-      brush->gpencil_settings->draw_angle_factor = 0.5f;
+      /* Spacing. */
+      brush->gpencil_settings->sample_mode = GP_BRUSH_SAMPLE_DEFAULT;
+      brush->gpencil_settings->input_samples = 2;
+      brush->gpencil_settings->simplify_f = 0.1f;
+
+      /* Active smoothing. */
+      brush->gpencil_settings->flag |= GP_BRUSH_USE_ACTIVE_SMOOTHING;
+      brush->gpencil_settings->active_smooth = 0.5f;
+      brush->gpencil_settings->draw_smoothlvl = 2;
+
+      /* Advanced. */
       brush->gpencil_settings->hardeness = 1.0f;
       copy_v2_fl(brush->gpencil_settings->aspect_ratio, 1.0f);
-
-      brush->gpencil_settings->flag |= GP_BRUSH_GROUP_SETTINGS;
-      brush->gpencil_settings->draw_smoothfac = 0.0f;
-      brush->gpencil_settings->draw_smoothlvl = 1;
-      brush->gpencil_settings->draw_subdivide = 0;
-      brush->gpencil_settings->simplify_f = 0.002f;
+      brush->gpencil_settings->draw_angle = DEG2RAD(35.0f);
+      brush->gpencil_settings->draw_angle_factor = 0.5f;
 
       brush->gpencil_settings->flag &= ~GP_BRUSH_GROUP_RANDOM;
       brush->gpencil_settings->draw_random_press = 0.0f;
@@ -887,18 +919,21 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
       brush->gpencil_settings->draw_strength = 1.0f;
       brush->gpencil_settings->flag &= ~GP_BRUSH_USE_STRENGTH_PRESSURE;
 
-      brush->gpencil_settings->input_samples = 10;
-      brush->gpencil_settings->active_smooth = ACTIVE_SMOOTH;
-      brush->gpencil_settings->draw_angle = 0.0f;
-      brush->gpencil_settings->draw_angle_factor = 0.0f;
+      /* Spacing. */
+      brush->gpencil_settings->sample_mode = GP_BRUSH_SAMPLE_ADAPTIVE;
+      brush->gpencil_settings->input_samples = 2;
+      brush->gpencil_settings->simplify_f = 0.1f;
+
+      /* Active smoothing. */
+      brush->gpencil_settings->flag |= GP_BRUSH_USE_ACTIVE_SMOOTHING;
+      brush->gpencil_settings->active_smooth = 0.4f;
+      brush->gpencil_settings->draw_smoothlvl = 2;
+
+      /* Advanced. */
       brush->gpencil_settings->hardeness = 1.0f;
       copy_v2_fl(brush->gpencil_settings->aspect_ratio, 1.0f);
-
-      brush->gpencil_settings->flag |= GP_BRUSH_GROUP_SETTINGS;
-      brush->gpencil_settings->draw_smoothfac = 0.0f;
-      brush->gpencil_settings->draw_smoothlvl = 1;
-      brush->gpencil_settings->draw_subdivide = 1;
-      brush->gpencil_settings->simplify_f = 0.002f;
+      brush->gpencil_settings->draw_angle = 0.0f;
+      brush->gpencil_settings->draw_angle_factor = 0.0f;
 
       brush->gpencil_settings->draw_random_press = 0.0f;
       brush->gpencil_settings->draw_random_strength = 0.0f;
@@ -918,18 +953,20 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
       brush->gpencil_settings->draw_strength = 0.4f;
       brush->gpencil_settings->flag |= GP_BRUSH_USE_STRENGTH_PRESSURE;
 
-      brush->gpencil_settings->input_samples = 10;
-      brush->gpencil_settings->active_smooth = ACTIVE_SMOOTH;
-      brush->gpencil_settings->draw_angle = 0.0f;
-      brush->gpencil_settings->draw_angle_factor = 0.0f;
+      /* Spacing. */
+      brush->gpencil_settings->sample_mode = GP_BRUSH_SAMPLE_FIXED;
+      brush->gpencil_settings->sample_distance = 0.3f;
+
+      /* Active smoothing. */
+      brush->gpencil_settings->flag |= GP_BRUSH_USE_ACTIVE_SMOOTHING;
+      brush->gpencil_settings->active_smooth = 0.5f;
+      brush->gpencil_settings->draw_smoothlvl = 2;
+
+      /* Advanced. */
       brush->gpencil_settings->hardeness = 0.8f;
       copy_v2_fl(brush->gpencil_settings->aspect_ratio, 1.0f);
-
-      brush->gpencil_settings->flag |= GP_BRUSH_GROUP_SETTINGS;
-      brush->gpencil_settings->draw_smoothfac = 0.0f;
-      brush->gpencil_settings->draw_smoothlvl = 1;
-      brush->gpencil_settings->draw_subdivide = 0;
-      brush->gpencil_settings->simplify_f = 0.000f;
+      brush->gpencil_settings->draw_angle = 0.0f;
+      brush->gpencil_settings->draw_angle_factor = 0.0f;
 
       brush->gpencil_settings->draw_random_press = 0.0f;
       brush->gpencil_settings->draw_random_strength = 0.0f;
@@ -952,18 +989,21 @@ void BKE_gpencil_brush_preset_set(Main *bmain, Brush *brush, const short type)
       brush->gpencil_settings->draw_strength = 0.6f;
       brush->gpencil_settings->flag |= GP_BRUSH_USE_STRENGTH_PRESSURE;
 
-      brush->gpencil_settings->input_samples = 10;
-      brush->gpencil_settings->active_smooth = ACTIVE_SMOOTH;
-      brush->gpencil_settings->draw_angle = 0.0f;
-      brush->gpencil_settings->draw_angle_factor = 0.0f;
+      /* Spacing. */
+      brush->gpencil_settings->sample_mode = GP_BRUSH_SAMPLE_ADAPTIVE;
+      brush->gpencil_settings->input_samples = 2;
+      brush->gpencil_settings->simplify_f = 0.1f;
+
+      /* Active smoothing. */
+      brush->gpencil_settings->flag |= GP_BRUSH_USE_ACTIVE_SMOOTHING;
+      brush->gpencil_settings->active_smooth = 0.75f;
+      brush->gpencil_settings->draw_smoothlvl = 3;
+
+      /* Advanced. */
       brush->gpencil_settings->hardeness = 1.0f;
       copy_v2_fl(brush->gpencil_settings->aspect_ratio, 1.0f);
-
-      brush->gpencil_settings->flag |= GP_BRUSH_GROUP_SETTINGS;
-      brush->gpencil_settings->draw_smoothfac = 0.0f;
-      brush->gpencil_settings->draw_smoothlvl = 1;
-      brush->gpencil_settings->draw_subdivide = 0;
-      brush->gpencil_settings->simplify_f = 0.002f;
+      brush->gpencil_settings->draw_angle = 0.0f;
+      brush->gpencil_settings->draw_angle_factor = 0.0f;
 
       brush->gpencil_settings->draw_random_press = 0.0f;
       brush->gpencil_settings->draw_jitter = 0.0f;

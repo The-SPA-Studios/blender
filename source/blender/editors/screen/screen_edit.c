@@ -1567,6 +1567,7 @@ ScrArea *ED_screen_temp_space_open(bContext *C,
 void ED_refresh_viewport_fps(bContext *C)
 {
   wmTimer *animtimer = CTX_wm_screen(C)->animtimer;
+  ScreenAnimData *sad = animtimer->customdata;
   Scene *scene = CTX_data_scene(C);
 
   /* is anim playback running? */
@@ -1608,6 +1609,9 @@ void ED_screen_animation_timer(bContext *C, int redraws, int sync, int enable)
     screen->animtimer = WM_event_add_timer(wm, win, TIMER0, (1.0 / FPS));
 
     sad->region = CTX_wm_region(C);
+    sad->scene = scene;
+    sad->view_layer = CTX_data_view_layer(C);
+
     /* If start-frame is larger than current frame, we put current-frame on start-frame.
      * NOTE(ton): first frame then is not drawn! */
     if (PRVRANGEON) {

@@ -50,6 +50,7 @@ void main()
                                vec4(drw_view.viewport_size, drw_view.viewport_size_inverse),
                                gp_flag,
                                gp_mat._alignment_rot,
+                               gpFrameMatrix,
                                gp_interp.pos,
                                vert_N,
                                vert_color,

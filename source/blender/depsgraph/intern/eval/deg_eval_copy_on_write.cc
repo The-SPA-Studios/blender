@@ -742,6 +742,8 @@ void update_id_after_copy(const Depsgraph *depsgraph,
       if (gpl != nullptr && gpl->runtime.gpl_orig == nullptr) {
         BKE_gpencil_data_update_orig_pointers((bGPdata *)id_orig, gpd_cow);
       }
+      /* Update cache pointer should never be set on gpd_cow. */
+      gpd_cow->runtime.update_cache = NULL;
       break;
     }
     default:
@@ -892,6 +894,8 @@ ID *deg_update_copy_on_write_datablock(const Depsgraph *depsgraph, const IDNode 
     if (id_type == ID_GD && BKE_gpencil_can_avoid_full_copy_on_write(
                                 (const ::Depsgraph *)depsgraph, (bGPdata *)id_orig)) {
       BKE_gpencil_update_on_write((bGPdata *)id_orig, (bGPdata *)id_cow);
+      BKE_gpencil_free_update_cache_if_disposable((const ::Depsgraph *)depsgraph,
+                                                  (bGPdata *)id_orig);
       return id_cow;
     }
   }

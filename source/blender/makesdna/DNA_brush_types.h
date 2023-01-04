@@ -56,6 +56,15 @@ typedef struct BrushGpencilSettings {
   short fill_layer_mode;
   short fill_direction;
 
+  /* Sampling mode. */
+  short sample_mode;
+  char _pad2[2];
+  float sample_distance;
+
+  /* Curve smoothing. */
+  float curve_smooth_threshold;
+  float curve_smooth_factor;
+
   /** Factor for transparency. */
   float fill_threshold;
   /** Number of pixel to consider the leak is too small (x 2). */

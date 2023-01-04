@@ -949,7 +949,7 @@ int WM_generic_select_modal(bContext *C, wmOperator *op, const wmEvent *event)
      * finished. Otherwise, it is still running until we get an 'release' event. In any
      * case, we pass through event, but select op is not finished yet. */
     if (WM_event_drag_test_with_delta(event, drag_delta)) {
-      return OPERATOR_FINISHED | OPERATOR_PASS_THROUGH;
+      return OPERATOR_CANCELLED | OPERATOR_PASS_THROUGH;
     }
     /* Important not to return anything other than PASS_THROUGH here,
      * otherwise it prevents underlying drag detection code to work properly. */
@@ -4107,6 +4107,30 @@ const EnumPropertyItem *RNA_scene_without_active_itemf(bContext *C,
                                                        bool *r_free)
 {
   Scene *scene_active = C ? CTX_data_scene(C) : NULL;
+  return rna_id_itemf(r_free,
+                      C ? (ID *)CTX_data_main(C)->scenes.first : NULL,
+                      false,
+                      rna_id_enum_filter_single,
+                      scene_active);
+}
+const EnumPropertyItem *RNA_seq_scene_without_active_itemf(bContext *C,
+                                                           PointerRNA *UNUSED(ptr),
+                                                           PropertyRNA *UNUSED(prop),
+                                                           bool *r_free)
+{
+  Scene *scene_active;
+  if (C != NULL) {
+    SpaceSeq *seq = CTX_wm_space_seq(C);
+    if (seq != NULL && seq->scene_override != NULL) {
+      scene_active = seq->scene_override;
+    }
+    else {
+      scene_active = CTX_data_scene(C);
+    }
+  }
+  else {
+    scene_active = NULL;
+  }
   return rna_id_itemf(r_free,
                       C ? (ID *)CTX_data_main(C)->scenes.first : NULL,
                       false,

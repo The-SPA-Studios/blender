@@ -96,11 +96,10 @@ class VIEW3D_HT_tool_header(Header):
             if is_valid_context:
                 brush = context.tool_settings.gpencil_paint.brush
                 if brush and brush.gpencil_tool != 'ERASE':
-                    if brush.gpencil_tool != 'TINT':
-                        layout.popover("VIEW3D_PT_tools_grease_pencil_brush_advanced")
-
                     if brush.gpencil_tool not in {'FILL', 'TINT'}:
                         layout.popover("VIEW3D_PT_tools_grease_pencil_brush_stroke")
+                    if brush.gpencil_tool != 'TINT':
+                        layout.popover("VIEW3D_PT_tools_grease_pencil_brush_advanced")
 
                     layout.popover("VIEW3D_PT_tools_grease_pencil_paint_appearance")
         elif tool_mode == 'SCULPT_GPENCIL':
@@ -799,6 +798,10 @@ class VIEW3D_HT_header(Header):
                     panel="VIEW3D_PT_gpencil_multi_frame",
                     text="Multiframe",
                 )
+
+            if (gpd.is_stroke_paint_mode or gpd.use_stroke_edit_mode or gpd.is_stroke_sculpt_mode):
+                row = layout.row(align=True)
+                row.prop(tool_settings, "use_gpencil_offset_frames", text="")
 
         overlay = view.overlay
 
@@ -5634,10 +5637,11 @@ class VIEW3D_PT_view3d_lock(Panel):
         layout.use_property_decorate = False  # No animation.
 
         view = context.space_data
+        rv3d = view.region_3d
 
         col = layout.column(align=True)
         sub = col.column()
-        sub.active = bool(view.region_3d.view_perspective != 'CAMERA' or view.region_quadviews)
+        sub.active = bool(rv3d.view_perspective != 'CAMERA' or view.region_quadviews)
 
         sub.prop(view, "lock_object")
         lock_object = view.lock_object
@@ -5654,6 +5658,7 @@ class VIEW3D_PT_view3d_lock(Panel):
         if not lock_object:
             col.prop(view, "lock_cursor", text="To 3D Cursor")
         col.prop(view, "lock_camera", text="Camera to View")
+        col.prop(rv3d, "lock_rotation", text="View Rotation")
 
 
 class VIEW3D_PT_view3d_cursor(Panel):
@@ -6959,11 +6964,11 @@ class VIEW3D_PT_gpencil_origin(Panel):
         col = row.column()
         col.prop(tool_settings, "gpencil_stroke_placement_view3d", expand=True)
 
-        if tool_settings.gpencil_stroke_placement_view3d == 'SURFACE':
-            row = layout.row()
-            row.label(text="Offset")
-            row = layout.row()
-            row.prop(gpd, "zdepth_offset", text="")
+        # if tool_settings.gpencil_stroke_placement_view3d == 'SURFACE':
+        #     row = layout.row()
+        #     row.label(text="Offset")
+        #     row = layout.row()
+        #     row.prop(gpd, "zdepth_offset", text="")
 
         if tool_settings.gpencil_stroke_placement_view3d == 'STROKE':
             row = layout.row()

@@ -2766,6 +2766,31 @@ static void rna_def_gpencil_interpolate(BlenderRNA *brna)
       "Custom curve to control 'sequence' interpolation between Grease Pencil frames");
 }
 
+/* Grease Pencil Frame Offset tool settings */
+static void rna_def_gpencil_frame_offset(BlenderRNA *brna)
+{
+  StructRNA *srna;
+  PropertyRNA *prop;
+
+  srna = RNA_def_struct(brna, "GPencilFrameOffsetSettings", NULL);
+  RNA_def_struct_sdna(srna, "GP_FrameOffset_Settings");
+  RNA_def_struct_ui_text(srna, "Grease Pencil Frame Offset Settings", "");
+
+  prop = RNA_def_property(srna, "use_current_frame", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "use_current_frame", 0);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_ui_text(
+      prop, "Use Current Frame", "Use the current frame in the scene for the frame offset tool");
+  RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, NULL);
+
+  prop = RNA_def_property(srna, "frame", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, NULL, "custom_frame");
+  RNA_def_property_int_default(prop, 0);
+  RNA_def_property_range(prop, MINAFRAME, MAXFRAME);
+  RNA_def_property_ui_text(prop, "Custom Frame", "Frame number to use the frame offset tool on");
+  RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, NULL);
+}
+
 static void rna_def_transform_orientation(BlenderRNA *brna)
 {
   StructRNA *srna;
@@ -3470,6 +3495,23 @@ static void rna_def_tool_settings(BlenderRNA *brna)
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, NULL);
 
+  prop = RNA_def_property(srna, "use_gpencil_offset_frames", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "gpencil_flags", GP_TOOL_FLAG_USE_FRAME_OFFSET_MATRIX);
+  RNA_def_property_boolean_default(prop, false);
+  RNA_def_property_ui_icon(prop, ICON_OBJECT_HIDDEN, 0);
+  RNA_def_property_ui_text(
+      prop, "Show Frame Offset", "Display the frame offset on grease pencil frames");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, "rna_GPencil_update");
+
+  prop = RNA_def_property(srna, "use_gpencil_only_active_layer", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "gpencil_flags", GP_TOOL_FLAG_ONLY_ACTIVE_LAYER);
+  RNA_def_property_boolean_default(prop, false);
+  RNA_def_property_ui_text(
+      prop, "Affect Only Active Layer", "When using the tool, only affect the active layer");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, "rna_GPencil_update");
+
   prop = RNA_def_property(srna, "gpencil_sculpt", PROP_POINTER, PROP_NONE);
   RNA_def_property_pointer_sdna(prop, NULL, "gp_sculpt");
   RNA_def_property_struct_type(prop, "GPencilSculptSettings");
@@ -3481,6 +3523,11 @@ static void rna_def_tool_settings(BlenderRNA *brna)
   RNA_def_property_struct_type(prop, "GPencilInterpolateSettings");
   RNA_def_property_ui_text(
       prop, "Grease Pencil Interpolate", "Settings for Grease Pencil Interpolation tools");
+
+  prop = RNA_def_property(srna, "gpencil_frame_offset", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, NULL, "gp_frame_offset");
+  RNA_def_property_struct_type(prop, "GPencilFrameOffsetSettings");
+  RNA_def_property_ui_text(prop, "Grease Pencil Frame Offset", "");
 
   /* Grease Pencil - 3D View Stroke Placement */
   prop = RNA_def_property(srna, "gpencil_stroke_placement_view3d", PROP_ENUM, PROP_NONE);
@@ -8257,6 +8304,7 @@ void RNA_def_scene(BlenderRNA *brna)
   RNA_define_animate_sdna(false);
   rna_def_tool_settings(brna);
   rna_def_gpencil_interpolate(brna);
+  rna_def_gpencil_frame_offset(brna);
   rna_def_unified_paint_settings(brna);
   rna_def_curve_paint_settings(brna);
   rna_def_sequencer_tool_settings(brna);

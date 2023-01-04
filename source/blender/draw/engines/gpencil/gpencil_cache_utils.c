@@ -215,10 +215,9 @@ static void gpencil_layer_final_tint_and_alpha_get(const GPENCIL_PrivateData *pd
 
     copy_v4_fl4(r_tint, UNPACK3(onion_col_custom), 1.0f);
 
-    *r_alpha = use_onion_fade ? (1.0f / abs(gpf->runtime.onion_id)) : 0.5f;
+    *r_alpha = use_onion_fade ? (1.0f / abs(gpf->runtime.onion_id)) : 1.0f;
     *r_alpha *= gpd->onion_factor;
-    *r_alpha = (gpd->onion_factor > 0.0f) ? clamp_f(*r_alpha, 0.1f, 1.0f) :
-                                            clamp_f(*r_alpha, 0.01f, 1.0f);
+    *r_alpha = clamp_f(*r_alpha, 0.01f, 1.0f);
   }
   else {
     copy_v4_v4(r_tint, gpl->tintcolor);
@@ -273,7 +272,7 @@ GPENCIL_tLayer *gpencil_layer_cache_add(GPENCIL_PrivateData *pd,
                                                 pd->vertex_paint_opacity);
   /* Negate thickness sign to tag that strokes are in screen space.
    * Convert to world units (by default, 1 meter = 2000 pixels). */
-  float thickness_scale = (is_screenspace) ? -1.0f : (gpd->pixfactor / GPENCIL_PIXEL_FACTOR);
+  float thickness_world_scale = (is_screenspace) ? -1.0f : (gpd->pixfactor / GPENCIL_PIXEL_FACTOR);
   float layer_opacity = gpencil_layer_final_opacity_get(pd, ob, gpl);
   float layer_tint[4];
   float layer_alpha;
@@ -286,6 +285,24 @@ GPENCIL_tLayer *gpencil_layer_cache_add(GPENCIL_PrivateData *pd,
   tgp_layer->mask_bits = NULL;
   tgp_layer->mask_invert_bits = NULL;
   tgp_layer->blend_ps = NULL;
+
+  bGPDframe *gpf_orig = gpf != NULL ? gpf->runtime.gpf_orig : NULL;
+  const bool use_frame_cache = gpf_orig && gpl->actframe != gpf &&
+                               (gpd->onion_space == GP_ONION_SPACE_WORLD) &&
+                               (gpf_orig->runtime.transform_valid);
+  float frame_matrix[4][4];
+  if (use_frame_cache) {
+    copy_m4_m4(frame_matrix, gpf_orig->runtime.transform);
+  }
+  else {
+    mul_m4_m4m4(frame_matrix, ob->obmat, gpl->layer_mat);
+  }
+
+  if (gpf != NULL && GP_USE_FRAME_OFFSET_MATRIX(pd->scene, gpd)) {
+    mul_m4_m4_post(frame_matrix, gpf->transformation_mat);
+  }
+
+  float thickness_scale = mat4_to_scale(frame_matrix);
 
   /* Masking: Go through mask list and extract valid masks in a bitmap. */
   if (is_masked) {
@@ -389,10 +406,12 @@ GPENCIL_tLayer *gpencil_layer_cache_add(GPENCIL_PrivateData *pd,
     DRW_shgroup_uniform_texture_ref(grp, "gpMaskTexture", mask_tex);
     DRW_shgroup_uniform_vec3_copy(grp, "gpNormal", tgp_ob->plane_normal);
     DRW_shgroup_uniform_bool_copy(grp, "gpStrokeOrder3d", tgp_ob->is_drawmode3d);
-    DRW_shgroup_uniform_float_copy(grp, "gpThicknessScale", tgp_ob->object_scale);
+    DRW_shgroup_uniform_float_copy(grp, "gpThicknessScale", thickness_scale);
     DRW_shgroup_uniform_float_copy(grp, "gpThicknessOffset", (float)gpl->line_change);
-    DRW_shgroup_uniform_float_copy(grp, "gpThicknessWorldScale", thickness_scale);
+    DRW_shgroup_uniform_float_copy(grp, "gpThicknessWorldScale", thickness_world_scale);
     DRW_shgroup_uniform_float_copy(grp, "gpVertexColorOpacity", vert_col_opacity);
+
+    DRW_shgroup_uniform_mat4_copy(grp, "gpFrameMatrix", frame_matrix);
 
     /* If random color type, need color by layer. */
     float gpl_color[4];

@@ -265,7 +265,7 @@ typedef struct tGPsdata {
 static void gpencil_update_cache(bGPdata *gpd)
 {
   if (gpd) {
-    DEG_id_tag_update(&gpd->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
+    DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
     gpd->flag |= GP_DATA_CACHE_IS_DIRTY;
   }
 }
@@ -1235,6 +1235,17 @@ static void gpencil_stroke_newfrombuffer(tGPsdata *p)
     }
   }
 
+  /* When we are using shift & trace, make sure to transform the stroke so that it appears visually
+   * where it was drawn. */
+  if (ts->gpencil_flags & GP_TOOL_FLAG_USE_FRAME_OFFSET_MATRIX) {
+    float final_inv[4][4];
+    invert_m4_m4(final_inv, p->gpf->transformation_mat);
+    for (int i = 0; i < gps->totpoints; i++) {
+      bGPDspoint *pt = &gps->points[i];
+      mul_m4_v3(final_inv, &pt->x);
+    }
+  }
+
   /* Save material index */
   gps->mat_nr = BKE_gpencil_object_material_get_index_from_brush(p->ob, p->brush);
   if (gps->mat_nr < 0) {
@@ -1717,6 +1728,7 @@ static void gpencil_stroke_doeraser(tGPsdata *p)
   Brush *brush = p->brush;
   Brush *eraser = p->eraser;
   bool use_pressure = false;
+  bool only_affect_active_layer = false;
   float press = 1.0f;
   BrushGpencilSettings *gp_settings = NULL;
 
@@ -1724,10 +1736,12 @@ static void gpencil_stroke_doeraser(tGPsdata *p)
   if (brush->gpencil_tool == GPAINT_TOOL_ERASE) {
     use_pressure = (bool)(brush->gpencil_settings->flag & GP_BRUSH_USE_PRESSURE);
     gp_settings = brush->gpencil_settings;
+    only_affect_active_layer = (gp_settings->flag & GP_BRUSH_ERASER_ACTIVE_LAYER) != 0;
   }
   else if ((eraser != NULL) & (eraser->gpencil_tool == GPAINT_TOOL_ERASE)) {
     use_pressure = (bool)(eraser->gpencil_settings->flag & GP_BRUSH_USE_PRESSURE);
     gp_settings = eraser->gpencil_settings;
+    only_affect_active_layer = (gp_settings->flag & GP_BRUSH_ERASER_ACTIVE_LAYER) != 0;
   }
   if (use_pressure) {
     press = p->pressure;
@@ -1756,6 +1770,10 @@ static void gpencil_stroke_doeraser(tGPsdata *p)
       continue;
     }
 
+    if (only_affect_active_layer && (gpl->flag & GP_LAYER_ACTIVE) == 0) {
+      continue;
+    }
+
     bGPDframe *init_gpf = (is_multiedit) ? gpl->frames.first : gpl->actframe;
     if (init_gpf == NULL) {
       continue;
@@ -1768,7 +1786,9 @@ static void gpencil_stroke_doeraser(tGPsdata *p)
         }
         /* calculate difference matrix */
         BKE_gpencil_layer_transform_matrix_get(p->depsgraph, p->ob, gpl, p->diff_mat);
-
+        if (p->scene->toolsettings->gpencil_flags & GP_TOOL_FLAG_USE_FRAME_OFFSET_MATRIX) {
+          mul_m4_m4_post(p->diff_mat, gpf->transformation_mat);
+        }
         /* loop over strokes, checking segments for intersections */
         LISTBASE_FOREACH_MUTABLE (bGPDstroke *, gps, &gpf->strokes) {
           /* check if the color is editable */
@@ -1787,6 +1807,7 @@ static void gpencil_stroke_doeraser(tGPsdata *p)
            */
           if (ED_gpencil_stroke_can_use_direct(p->area, gps)) {
             gpencil_stroke_eraser_dostroke(p, gpl, gpf, gps, p->mval, calc_radius, &rect);
+            BKE_gpencil_tag_full_update(p->gpd, gpl, gpf, NULL);
           }
         }
 

@@ -1,0 +1,13 @@
+<bpy>
+  <Theme>
+    <dopesheet_editor>
+      <ThemeDopeSheet
+        dopesheet_channel="#1c589144"
+        channels_selected="#488f32b3"
+        >
+      </ThemeDopeSheet>
+    </dopesheet_editor>
+  </Theme>
+  <ThemeStyle>
+  </ThemeStyle>
+</bpy>

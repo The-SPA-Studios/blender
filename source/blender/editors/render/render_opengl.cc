@@ -29,6 +29,7 @@
 #include "DNA_scene_types.h"
 
 #include "BKE_anim_data.h"
+#include "BKE_callbacks.h"
 #include "BKE_camera.h"
 #include "BKE_context.h"
 #include "BKE_customdata.h"
@@ -429,6 +430,8 @@ static void screen_opengl_render_write(OGLRender *oglrender)
   bool ok;
   char name[FILE_MAX];
 
+  BKE_callback_exec_id(oglrender->bmain, &oglrender->scene->id, BKE_CB_EVT_RENDER_WRITE);
+
   rr = RE_AcquireResultRead(oglrender->re);
 
   BKE_image_path_from_imformat(name,
@@ -518,6 +521,7 @@ static void screen_opengl_render_apply(const bContext *C, OGLRender *oglrender)
   BKE_image_release_ibuf(oglrender->ima, ibuf, lock);
   BKE_image_partial_update_mark_full_update(oglrender->ima);
 
+  BKE_callback_exec_id(oglrender->bmain, &oglrender->scene->id, BKE_CB_EVT_RENDER_POST);
   if (oglrender->write_still) {
     screen_opengl_render_write(oglrender);
   }
@@ -931,6 +935,16 @@ static void screen_opengl_render_end(bContext *C, OGLRender *oglrender)
     WM_event_remove_timer(oglrender->wm, oglrender->win, oglrender->timer);
   }
 
+  if (oglrender->is_animation) {
+    BKE_callback_exec_id(oglrender->bmain,
+                         &oglrender->scene->id,
+                         (oglrender->pool_ok) ? BKE_CB_EVT_RENDER_COMPLETE :
+                                                BKE_CB_EVT_RENDER_CANCEL);
+  }
+  else {
+    BKE_callback_exec_id(oglrender->bmain, &oglrender->scene->id, BKE_CB_EVT_RENDER_COMPLETE);
+  }
+
   WM_cursor_modal_restore(oglrender->win);
 
   WM_event_add_notifier(C, NC_SCENE | ND_RENDER_RESULT, oglrender->scene);
@@ -1088,6 +1102,10 @@ static void write_result(TaskPool *__restrict pool, WriteTaskData *task_data)
   if (!ok) {
     oglrender->pool_ok = false;
   }
+  else {
+    BKE_callback_exec_id(oglrender->bmain, &oglrender->scene->id, BKE_CB_EVT_RENDER_WRITE);
+  }
+
   RE_FreeRenderResult(rr);
   BLI_mutex_lock(&oglrender->task_mutex);
   oglrender->num_scheduled_frames--;
@@ -1238,6 +1256,8 @@ static int screen_opengl_render_modal(bContext *C, wmOperator *op, const wmEvent
   /* run first because screen_opengl_render_anim_step can free oglrender */
   WM_event_add_notifier(C, NC_SCENE | ND_RENDER_RESULT, oglrender->scene);
 
+  BKE_callback_exec_id(oglrender->bmain, &oglrender->scene->id, BKE_CB_EVT_RENDER_PRE);
+
   if (anim == 0) {
     screen_opengl_render_apply(C, static_cast<OGLRender *>(op->customdata));
     screen_opengl_render_end(C, static_cast<OGLRender *>(op->customdata));
@@ -1270,6 +1290,8 @@ static int screen_opengl_render_invoke(bContext *C, wmOperator *op, const wmEven
   }
 
   oglrender = static_cast<OGLRender *>(op->customdata);
+  BKE_callback_exec_id(oglrender->bmain, &oglrender->scene->id, BKE_CB_EVT_RENDER_INIT);
+
   render_view_open(C, event->xy[0], event->xy[1], op->reports);
 
   /* View may be changed above #USER_RENDER_DISPLAY_WINDOW. */

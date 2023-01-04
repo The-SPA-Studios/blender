@@ -210,14 +210,6 @@ static void gpencil_sculpt_compute_lock_axis(tGP_BrushEditData *gso,
   }
 }
 
-/* Context ---------------------------------------- */
-
-/* Get the sculpting settings */
-static GP_Sculpt_Settings *gpencil_sculpt_get_settings(Scene *scene)
-{
-  return &scene->toolsettings->gp_sculpt;
-}
-
 /* Brush Operations ------------------------------- */
 
 /* Invert behavior of brush? */
@@ -271,13 +263,6 @@ static float gpencil_brush_influence_calc(tGP_BrushEditData *gso,
 
   /* return influence */
   return influence;
-}
-
-/* Tag stroke to be recalculated. */
-static void gpencil_recalc_geometry_tag(bGPDstroke *gps)
-{
-  bGPDstroke *gps_active = (gps->runtime.gps_orig) ? gps->runtime.gps_orig : gps;
-  gps_active->flag |= GP_STROKE_TAG;
 }
 
 /* Recalc any stroke tagged. */
@@ -490,6 +475,7 @@ static bool gpencil_brush_grab_store_points(tGP_BrushEditData *gso,
                                             const int radius,
                                             const int co[2])
 {
+  /* NOTE: This should be passed to the callback, not looked up for every point. */
   tGPSB_Grab_StrokeData *data = BLI_ghash_lookup(gso->stroke_customdata, gps);
   float inf = gpencil_brush_influence_calc(gso, radius, co);
 
@@ -515,21 +501,24 @@ static void gpencil_brush_grab_calc_dvec(tGP_BrushEditData *gso)
   const float zfac = ED_view3d_calc_zfac(rv3d, rvec);
 
   float mval_f[2];
-
-  /* convert from 2D screenspace to 3D... */
   mval_f[0] = (float)(gso->mval[0] - gso->mval_prev[0]);
   mval_f[1] = (float)(gso->mval[1] - gso->mval_prev[1]);
 
   /* apply evaluated data transformation */
   if (gso->rot_eval != 0.0f) {
-    const float cval = cos(gso->rot_eval);
-    const float sval = sin(gso->rot_eval);
     float r[2];
-    r[0] = (mval_f[0] * cval) - (mval_f[1] * sval);
-    r[1] = (mval_f[0] * sval) + (mval_f[1] * cval);
+    rotate_v2_v2fl(r, mval_f, gso->rot_eval);
     copy_v2_v2(mval_f, r);
+
+    // const float cval = cos(gso->rot_eval);
+    // const float sval = sin(gso->rot_eval);
+    // float r[2];
+    // r[0] = (mval_f[0] * cval) - (mval_f[1] * sval);
+    // r[1] = (mval_f[0] * sval) + (mval_f[1] * cval);
+    // copy_v2_v2(mval_f, r);
   }
 
+  /* Convert from 2D screenspace to 3D. */
   ED_view3d_win_to_delta(gso->region, mval_f, zfac, gso->dvec);
 }
 
@@ -1154,7 +1143,7 @@ static bool gpencil_sculpt_brush_init(bContext *C, wmOperator *op)
   gso->depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
   gso->bmain = CTX_data_main(C);
   /* store state */
-  gso->settings = gpencil_sculpt_get_settings(scene);
+  gso->settings = &scene->toolsettings->gp_sculpt;
 
   /* Random generator, only init once. */
   uint rng_seed = (uint)(PIL_check_seconds_timer_i() & UINT_MAX);
@@ -1502,6 +1491,9 @@ static bool gpencil_sculpt_brush_do_stroke(tGP_BrushEditData *gso,
       pt1 = gps->points + i;
       pt2 = gps->points + i + 1;
 
+      bGPDspoint *pt1_active = (pt1->runtime.pt_orig) ? pt1->runtime.pt_orig : pt1;
+      bGPDspoint *pt2_active = (pt2->runtime.pt_orig) ? pt2->runtime.pt_orig : pt2;
+
       /* Skip if neither one is selected
        * (and we are only allowed to edit/consider selected points) */
       if (GPENCIL_ANY_SCULPT_MASK(gso->mask)) {
@@ -1611,9 +1603,6 @@ static bool gpencil_sculpt_brush_do_frame(bContext *C,
                                (GP_SCULPT_FLAGMODE_AUTOMASK_STROKE |
                                 GP_SCULPT_FLAGMODE_AUTOMASK_LAYER |
                                 GP_SCULPT_FLAGMODE_AUTOMASK_MATERIAL)) != 0;
-  /* Calc bound box matrix. */
-  float bound_mat[4][4];
-  BKE_gpencil_layer_transform_matrix_get(gso->depsgraph, gso->object, gpl, bound_mat);
 
   LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
     /* skip strokes that are invalid for current view */
@@ -1634,7 +1623,7 @@ static bool gpencil_sculpt_brush_do_frame(bContext *C,
 
     /* Check if the stroke collide with brush. */
     if ((gps->totpoints > 1) &&
-        (!ED_gpencil_stroke_check_collision(gsc, gps, gso->mval, radius, bound_mat))) {
+        (!ED_gpencil_stroke_check_collision(gsc, gps, gso->mval, radius, diff_mat))) {
       continue;
     }
 
@@ -1671,7 +1660,7 @@ static bool gpencil_sculpt_brush_do_frame(bContext *C,
              */
             gpencil_brush_grab_stroke_init(gso, gps_active);
             changed |= gpencil_sculpt_brush_do_stroke(
-                gso, gps_active, bound_mat, gpencil_brush_grab_store_points);
+                gso, gps_active, diff_mat, gpencil_brush_grab_store_points);
           }
           else {
             /* Apply effect to the stored points */
@@ -1727,12 +1716,12 @@ static bool gpencil_sculpt_brush_do_frame(bContext *C,
           BKE_gpencil_stroke_geometry_update(gpd, gps_active);
         }
         else {
-          gpencil_recalc_geometry_tag(gps_active);
+          gps_active->flag |= GP_STROKE_TAG;
         }
       }
       else {
         /* Delay a full recalculation for other frames. */
-        gpencil_recalc_geometry_tag(gps_active);
+        gps_active->flag |= GP_STROKE_TAG;
       }
       bGPDlayer *gpl_active = (gpl->runtime.gpl_orig) ? gpl->runtime.gpl_orig : gpl;
       bGPDframe *gpf_active = (gpf->runtime.gpf_orig) ? gpf->runtime.gpf_orig : gpf;
@@ -1922,7 +1911,9 @@ static bool gpencil_sculpt_brush_apply_standard(bContext *C, tGP_BrushEditData *
     /* calculate difference matrix */
     float diff_mat[4][4];
     BKE_gpencil_layer_transform_matrix_get(depsgraph, obact, gpl, diff_mat);
-    mul_m4_m4m4(diff_mat, diff_mat, gpl->layer_invmat);
+    if (ts->gpencil_flags & GP_TOOL_FLAG_USE_FRAME_OFFSET_MATRIX) {
+      mul_m4_m4_post(diff_mat, gpl->actframe->transformation_mat);
+    }
 
     /* Active Frame or MultiFrame? */
     if (gso->is_multiframe) {

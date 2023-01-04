@@ -88,11 +88,23 @@ void ANIM_list_elem_update(Main *bmain, Scene *scene, bAnimListElem *ale)
     }
   }
   else {
-    /* in other case we do standard depsgraph update, ideally
-     * we'd be calling property update functions here too ... */
-    DEG_id_tag_update(id,
-                      /* XXX: or do we want something more restrictive? */
-                      ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY | ID_RECALC_ANIMATION);
+    int recalc_flags;
+
+    switch (GS(id->name)) {
+      case ID_GD:
+        /* If there were no animation on a gpencil data, we assume only keyframes were updated.
+         * Tag only for geometry update in this case. */
+        recalc_flags = ID_RECALC_GEOMETRY;
+        break;
+      default:
+        /* By default, we do standard depsgraph update, ideally
+         * we'd be calling property update functions here too ... */
+        /* XXX: or do we want something more restrictive? */
+        recalc_flags = ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY | ID_RECALC_ANIMATION;
+        break;
+    }
+
+    DEG_id_tag_update(id, recalc_flags);
   }
 }
 
@@ -232,28 +244,6 @@ static void animchan_sync_fcurve(bAnimListElem *ale)
   }
 }
 
-/* perform syncing updates for GPencil Layers */
-static void animchan_sync_gplayer(bAnimListElem *ale)
-{
-  bGPDlayer *gpl = (bGPDlayer *)ale->data;
-
-  /* Make sure the selection flags agree with the "active" flag.
-   * The selection flags are used in the Dopesheet only, whereas
-   * the active flag is used everywhere else. Hence, we try to
-   * sync these here so that it all seems to be have as the user
-   * expects - T50184
-   *
-   * Assume that we only really do this when the active status changes.
-   * (NOTE: This may prove annoying if it means selection is always lost)
-   */
-  if (gpl->flag & GP_LAYER_ACTIVE) {
-    gpl->flag |= GP_LAYER_SELECT;
-  }
-  else {
-    gpl->flag &= ~GP_LAYER_SELECT;
-  }
-}
-
 /* ---------------- */
 
 void ANIM_sync_animchannels_to_data(const bContext *C)
@@ -288,10 +278,6 @@ void ANIM_sync_animchannels_to_data(const bContext *C)
 
       case ANIMTYPE_FCURVE:
         animchan_sync_fcurve(ale);
-        break;
-
-      case ANIMTYPE_GPLAYER:
-        animchan_sync_gplayer(ale);
         break;
     }
   }

@@ -267,7 +267,7 @@ static int sequencer_gap_remove_exec(bContext *C, wmOperator *op)
 
   SEQ_edit_remove_gaps(scene, ed->seqbasep, scene->r.cfra, do_all);
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
 
   return OPERATOR_FINISHED;
@@ -306,7 +306,7 @@ static int sequencer_gap_insert_exec(bContext *C, wmOperator *op)
   const Editing *ed = SEQ_editing_get(scene);
   SEQ_transform_offset_after_frame(scene, ed->seqbasep, frames, scene->r.cfra);
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -412,7 +412,7 @@ static int sequencer_snap_exec(bContext *C, wmOperator *op)
   }
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -582,7 +582,7 @@ static int sequencer_slip_invoke(bContext *C, wmOperator *op, const wmEvent *eve
   WM_event_add_modal_handler(C, op);
 
   /* Notify so we draw extensions immediately. */
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_RUNNING_MODAL;
 }
@@ -660,7 +660,7 @@ static int sequencer_slip_exec(bContext *C, wmOperator *op)
   MEM_freeN(data->ts);
   MEM_freeN(data);
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
   return OPERATOR_FINISHED;
 }
@@ -704,7 +704,7 @@ static int sequencer_slip_modal(bContext *C, wmOperator *op, const wmEvent *even
     RNA_int_set(op->ptr, "offset", offset);
 
     sequencer_slip_recursively(scene, data, offset);
-    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
     return OPERATOR_RUNNING_MODAL;
   }
@@ -736,7 +736,7 @@ static int sequencer_slip_modal(bContext *C, wmOperator *op, const wmEvent *even
         RNA_int_set(op->ptr, "offset", offset);
 
         sequencer_slip_recursively(scene, data, offset);
-        WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+        WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
       }
       break;
     }
@@ -753,7 +753,7 @@ static int sequencer_slip_modal(bContext *C, wmOperator *op, const wmEvent *even
         ED_area_status_text(area, NULL);
       }
       DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
-      WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+      WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
       return OPERATOR_FINISHED;
     }
 
@@ -774,7 +774,7 @@ static int sequencer_slip_modal(bContext *C, wmOperator *op, const wmEvent *even
       MEM_freeN(data);
       op->customdata = NULL;
 
-      WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+      WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
       if (area) {
         ED_area_status_text(area, NULL);
@@ -813,7 +813,7 @@ static int sequencer_slip_modal(bContext *C, wmOperator *op, const wmEvent *even
     RNA_int_set(op->ptr, "offset", offset);
 
     sequencer_slip_recursively(scene, data, offset);
-    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
   }
 
   return OPERATOR_RUNNING_MODAL;
@@ -880,7 +880,7 @@ static int sequencer_mute_exec(bContext *C, wmOperator *op)
   }
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -937,7 +937,7 @@ static int sequencer_unmute_exec(bContext *C, wmOperator *op)
   }
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -978,7 +978,7 @@ static int sequencer_lock_exec(bContext *C, wmOperator *UNUSED(op))
     }
   }
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -1016,7 +1016,7 @@ static int sequencer_unlock_exec(bContext *C, wmOperator *UNUSED(op))
     }
   }
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -1062,7 +1062,7 @@ static int sequencer_reload_exec(bContext *C, wmOperator *op)
     }
   }
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -1112,7 +1112,7 @@ static int sequencer_refresh_all_exec(bContext *C, wmOperator *UNUSED(op))
 
   SEQ_relations_free_imbuf(scene, &ed->seqbase, false);
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -1265,7 +1265,7 @@ static int sequencer_reassign_inputs_exec(bContext *C, wmOperator *op)
   SEQ_relations_invalidate_cache_preprocessed(scene, last_seq);
   SEQ_offset_animdata(scene, last_seq, (last_seq->start - old_start));
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -1322,7 +1322,7 @@ static int sequencer_swap_inputs_exec(bContext *C, wmOperator *op)
 
   SEQ_relations_invalidate_cache_preprocessed(scene, last_seq);
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -1451,7 +1451,7 @@ static int sequencer_split_exec(bContext *C, wmOperator *op)
     }
   }
   if (changed) {
-    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
     return OPERATOR_FINISHED;
   }
 
@@ -1629,7 +1629,7 @@ static int sequencer_add_duplicate_exec(bContext *C, wmOperator *UNUSED(op))
 
   SEQ_animation_restore_original(scene, &fcurves_original_backup);
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
   return OPERATOR_FINISHED;
 }
 
@@ -1696,7 +1696,7 @@ static int sequencer_delete_exec(bContext *C, wmOperator *op)
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
   DEG_relations_tag_update(bmain);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
   return OPERATOR_FINISHED;
 }
 
@@ -1777,7 +1777,7 @@ static int sequencer_offset_clear_exec(bContext *C, wmOperator *UNUSED(op))
     }
   }
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -1878,7 +1878,7 @@ static int sequencer_separate_images_exec(bContext *C, wmOperator *op)
   }
 
   SEQ_edit_remove_flagged_sequences(scene, seqbase);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -1932,7 +1932,7 @@ static int sequencer_meta_toggle_exec(bContext *C, wmOperator *UNUSED(op))
   }
 
   // DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -1999,7 +1999,7 @@ static int sequencer_meta_make_exec(bContext *C, wmOperator *op)
   }
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -2061,7 +2061,7 @@ static int sequencer_meta_separate_exec(bContext *C, wmOperator *UNUSED(op))
   }
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -2127,7 +2127,7 @@ static int sequencer_strip_jump_exec(bContext *C, wmOperator *op)
   }
 
   DEG_id_tag_update(&scene->id, ID_RECALC_FRAME_CHANGE);
-  WM_event_add_notifier(C, NC_SCENE | ND_FRAME, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_FRAME, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -2283,7 +2283,7 @@ static int sequencer_swap_exec(bContext *C, wmOperator *op)
       }
     }
 
-    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
     return OPERATOR_FINISHED;
   }
 
@@ -2594,7 +2594,7 @@ static int sequencer_paste_exec(bContext *C, wmOperator *op)
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
   DEG_relations_tag_update(bmain);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
   ED_outliner_select_sync_from_sequence_tag(C);
 
   return OPERATOR_FINISHED;
@@ -2668,7 +2668,7 @@ static int sequencer_swap_data_exec(bContext *C, wmOperator *op)
   SEQ_relations_invalidate_cache_raw(scene, seq_act);
   SEQ_relations_invalidate_cache_raw(scene, seq_other);
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -2731,7 +2731,7 @@ static int sequencer_change_effect_input_exec(bContext *C, wmOperator *op)
   SWAP(Sequence *, *seq_1, *seq_2);
 
   SEQ_relations_invalidate_cache_preprocessed(scene, seq);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -2810,7 +2810,7 @@ static int sequencer_change_effect_type_exec(bContext *C, wmOperator *op)
   sh.init(seq);
 
   SEQ_relations_invalidate_cache_preprocessed(scene, seq);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -2927,7 +2927,7 @@ static int sequencer_change_path_exec(bContext *C, wmOperator *op)
   }
 
   SEQ_relations_invalidate_cache_raw(scene, seq);
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -3282,7 +3282,7 @@ static int sequencer_set_range_to_strips_exec(bContext *C, wmOperator *op)
     scene->r.efra = efra;
   }
 
-  WM_event_add_notifier(C, NC_SCENE | ND_FRAME_RANGE, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_FRAME_RANGE, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -3362,7 +3362,7 @@ static int sequencer_strip_transform_clear_exec(bContext *C, wmOperator *op)
     }
   }
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
   return OPERATOR_FINISHED;
 }
 
@@ -3427,7 +3427,7 @@ static int sequencer_strip_transform_fit_exec(bContext *C, wmOperator *op)
     }
   }
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
   return OPERATOR_FINISHED;
 }
 
@@ -3464,7 +3464,7 @@ static int sequencer_strip_color_tag_set_exec(bContext *C, wmOperator *op)
     }
   }
 
-  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, SEQ_get_ref_scene_for_notifiers(C));
   return OPERATOR_FINISHED;
 }
 
@@ -3562,6 +3562,50 @@ void SEQUENCER_OT_cursor_set(wmOperatorType *ot)
                        "Cursor location in normalized preview coordinates",
                        -10.0f,
                        10.0f);
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Remove scence override operator
+ * \{ */
+
+static bool sequencer_remove_scene_override_poll(bContext *C)
+{
+  SpaceSeq *seq = CTX_wm_space_seq(C);
+  return (seq != NULL && seq->scene_override != NULL);
+}
+
+static int sequencer_remove_scene_override_exec(bContext *C, wmOperator *op)
+{
+  SpaceSeq *seq = CTX_wm_space_seq(C);
+
+  if (seq == NULL) {
+    BKE_report(op->reports, RPT_ERROR, "Incorrect context for removing scene override");
+    return OPERATOR_CANCELLED;
+  }
+
+  /* Remove scene override. */
+  seq->scene_override = NULL;
+
+  WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, CTX_data_scene(C));
+
+  return OPERATOR_FINISHED;
+}
+
+void SEQUENCER_OT_remove_scene_override(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Remove Scene Override";
+  ot->idname = "SEQUENCER_OT_remove_scene_override";
+  ot->description = "Remove the scene override from the sequencer";
+
+  /* api callbacks */
+  ot->exec = sequencer_remove_scene_override_exec;
+  ot->poll = sequencer_remove_scene_override_poll;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
 }
 
 /** \} */

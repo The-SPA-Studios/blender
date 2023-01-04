@@ -66,6 +66,8 @@
 #include "ED_util.h"
 #include "ED_view3d.h"
 
+#include "SEQ_sequencer.h"
+
 #include "RNA_access.h"
 #include "RNA_define.h"
 #include "RNA_enum_types.h"
@@ -2960,7 +2962,7 @@ static int frame_offset_exec(bContext *C, wmOperator *op)
 
   DEG_id_tag_update(&scene->id, ID_RECALC_FRAME_CHANGE);
 
-  WM_event_add_notifier(C, NC_SCENE | ND_FRAME, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_FRAME, SEQ_get_ref_scene_for_notifiers(C));
 
   return OPERATOR_FINISHED;
 }
@@ -4567,19 +4569,18 @@ static int screen_animation_step_invoke(bContext *C, wmOperator *UNUSED(op), con
     return OPERATOR_PASS_THROUGH;
   }
 
-  wmWindow *win = CTX_wm_window(C);
-
 #ifdef PROFILE_AUDIO_SYNCH
   static int old_frame = 0;
   int newfra_int;
 #endif
 
   Main *bmain = CTX_data_main(C);
-  Scene *scene = CTX_data_scene(C);
-  ViewLayer *view_layer = WM_window_get_active_view_layer(win);
+  ScreenAnimData *sad = wt->customdata;
+  Scene *scene = sad->scene;
+  ViewLayer *view_layer = sad->view_layer;
   Depsgraph *depsgraph = BKE_scene_get_depsgraph(scene, view_layer);
   Scene *scene_eval = (depsgraph != NULL) ? DEG_get_evaluated_scene(depsgraph) : NULL;
-  ScreenAnimData *sad = wt->customdata;
+
   wmWindowManager *wm = CTX_wm_manager(C);
   int sync;
   double time;
@@ -4818,6 +4819,25 @@ int ED_screen_animation_play(bContext *C, int sync, int mode)
     /* stop playback now */
     ED_screen_animation_timer(C, 0, 0, 0);
     BKE_sound_stop_scene(scene_eval);
+
+    /* Stop sound in sequencer scene overrides. */
+    wmWindow *win = CTX_wm_window(C);
+    ED_screen_areas_iter (win, screen, area) {
+      LISTBASE_FOREACH (SpaceLink *, space, &area->spacedata) {
+        if (space->spacetype == SPACE_SEQ) {
+          SpaceSeq *seq = (SpaceSeq *)space;
+          if (seq->scene_override == NULL) {
+            continue;
+          }
+          Scene *scene_override = seq->scene_override;
+          ViewLayer *view_layer_override = (ViewLayer *)(scene_override->view_layers.first);
+          Depsgraph *depsgraph = BKE_scene_ensure_depsgraph(
+              CTX_data_main(C), scene_override, view_layer_override);
+          Scene *scene_override_eval = DEG_get_evaluated_scene(depsgraph);
+          BKE_sound_stop_scene(scene_override_eval);
+        }
+      }
+    }
 
     WM_event_add_notifier(C, NC_SCENE | ND_FRAME, scene);
   }

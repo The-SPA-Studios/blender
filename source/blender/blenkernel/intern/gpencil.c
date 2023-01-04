@@ -48,8 +48,11 @@
 #include "BKE_main.h"
 #include "BKE_material.h"
 #include "BKE_paint.h"
+#include "BKE_scene.h"
 
+#include "BLI_dlrbTree.h"
 #include "BLI_math_color.h"
+#include "BLI_task.h"
 
 #include "DEG_depsgraph_query.h"
 
@@ -57,13 +60,110 @@
 
 static CLG_LogRef LOG = {"bke.gpencil"};
 
-static void greasepencil_copy_data(Main *UNUSED(bmain),
-                                   ID *id_dst,
-                                   const ID *id_src,
-                                   const int UNUSED(flag))
+typedef struct tGPCopyUserData {
+  bGPDstroke **strokes_copy_array;
+  int strokes_num;
+} tGPCopyUserData;
+
+static void parallel_copy_stroke_cb(void *__restrict userdata,
+                                    void *item,
+                                    int index,
+                                    const TaskParallelTLS *__restrict UNUSED(tls))
 {
-  bGPdata *gpd_dst = (bGPdata *)id_dst;
-  const bGPdata *gpd_src = (const bGPdata *)id_src;
+  tGPCopyUserData *udata = (tGPCopyUserData *)userdata;
+  bGPDstroke *gps = (bGPDstroke *)item;
+  bGPDstroke *gps_copy = BKE_gpencil_stroke_duplicate(gps, true, true);
+  udata->strokes_copy_array[index] = gps_copy;
+}
+
+static void greasepencil_copy_data_ex(bGPdata *gpd_dst, const bGPdata *gpd_src)
+{
+  ListBase strokes = {0};
+  int strokes_num = 0;
+  /* Iterate over the data once and collect all the strokes into a single listbase. */
+  LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd_src->layers) {
+    if (gpl->frames.first == NULL) {
+      continue;
+    }
+
+    ListBase gpf_strokes = {0};
+    LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+      if (gpf->strokes.first == NULL) {
+        continue;
+      }
+
+      strokes_num += BLI_listbase_count(&gpf->strokes);
+
+      if (gpf_strokes.first == NULL) {
+        gpf_strokes.first = gpf->strokes.first;
+        gpf_strokes.last = gpf->strokes.last;
+      }
+      else {
+        ((bGPDstroke *)gpf_strokes.last)->next = gpf->strokes.first;
+        ((bGPDstroke *)gpf->strokes.first)->prev = gpf_strokes.last;
+        gpf_strokes.last = gpf->strokes.last;
+      }
+    }
+
+    if (BLI_listbase_is_empty(&gpf_strokes)) {
+      continue;
+    }
+
+    if (strokes.first == NULL) {
+      strokes.first = gpf_strokes.first;
+      strokes.last = gpf_strokes.last;
+    }
+    else {
+      ((bGPDstroke *)strokes.last)->next = gpf_strokes.first;
+      ((bGPDstroke *)gpf_strokes.first)->prev = strokes.last;
+      strokes.last = gpf_strokes.last;
+    }
+  }
+
+  /* Allocate array to store the copied strokes (pointers) into. */
+  tGPCopyUserData userdata;
+  userdata.strokes_copy_array = MEM_callocN(sizeof(bGPDstroke *) * strokes_num, __func__);
+  userdata.strokes_num = strokes_num;
+
+  /* Duplicate all the strokes in parallel. */
+  TaskParallelSettings settings = {0};
+  BLI_parallel_range_settings_defaults(&settings);
+  BLI_task_parallel_listbase(&strokes, &userdata, parallel_copy_stroke_cb, &settings);
+
+  /* Duplicate the layers and frames and insert the strokes from the strokes_copy_array. */
+  BLI_listbase_clear(&gpd_dst->layers);
+  int gps_idx = 0;
+  LISTBASE_FOREACH (bGPDlayer *, gpl_src, &gpd_src->layers) {
+    bGPDlayer *gpl_dst = MEM_dupallocN(gpl_src);
+    gpl_dst->prev = gpl_dst->next = NULL;
+
+    BLI_listbase_clear(&gpl_dst->frames);
+    LISTBASE_FOREACH (bGPDframe *, gpf_src, &gpl_src->frames) {
+      bGPDframe *gpf_dst = MEM_dupallocN(gpf_src);
+      gpf_dst->prev = gpf_dst->next = NULL;
+
+      if (!BLI_listbase_is_empty(&gpf_src->strokes)) {
+        /* Disconnect lists of strokes again. */
+        ((bGPDstroke *)gpf_src->strokes.first)->prev = NULL;
+        ((bGPDstroke *)gpf_src->strokes.last)->next = NULL;
+      }
+
+      BLI_listbase_clear(&gpf_dst->strokes);
+      LISTBASE_FOREACH (bGPDstroke *, gps_src, &gpf_src->strokes) {
+        BLI_addtail(&gpf_dst->strokes, userdata.strokes_copy_array[gps_idx]);
+        gps_idx++;
+      }
+
+      if (gpf_src == gpl_dst->actframe) {
+        gpl_dst->actframe = gpf_dst;
+      }
+      BLI_addtail(&gpl_dst->frames, gpf_dst);
+    }
+
+    BKE_gpencil_layer_mask_copy(gpl_src, gpl_dst);
+    BLI_addtail(&gpd_dst->layers, gpl_dst);
+  }
+  MEM_freeN(userdata.strokes_copy_array);
 
   /* duplicate material array */
   if (gpd_src->mat) {
@@ -71,50 +171,68 @@ static void greasepencil_copy_data(Main *UNUSED(bmain),
   }
 
   BKE_defgroup_copy_list(&gpd_dst->vertex_group_names, &gpd_src->vertex_group_names);
+}
 
-  /* copy layers */
-  BLI_listbase_clear(&gpd_dst->layers);
-  LISTBASE_FOREACH (bGPDlayer *, gpl_src, &gpd_src->layers) {
-    /* make a copy of source layer and its data */
+static void greasepencil_copy_data(Main *UNUSED(bmain),
+                                   ID *id_dst,
+                                   const ID *id_src,
+                                   const int UNUSED(flag))
+{
+  greasepencil_copy_data_ex((bGPdata *)id_dst, (bGPdata *)id_src);
+}
 
-    /* TODO: here too could add unused flags... */
-    bGPDlayer *gpl_dst = BKE_gpencil_layer_duplicate(gpl_src, true, true);
+static void parallel_free_stroke_cb(void *__restrict UNUSED(userdata),
+                                    void *item,
+                                    int UNUSED(index),
+                                    const TaskParallelTLS *__restrict UNUSED(tls))
+{
+  bGPDstroke *gps = (bGPDstroke *)item;
+  BKE_gpencil_free_stroke(gps);
+}
 
-    /* Apply local layer transform to all frames. Calc the active frame is not enough
-     * because onion skin can use more frames. This is more slow but required here. */
-    if (gpl_dst->actframe != NULL) {
-      bool transformed = ((!is_zero_v3(gpl_dst->location)) || (!is_zero_v3(gpl_dst->rotation)) ||
-                          (!is_one_v3(gpl_dst->scale)));
-      if (transformed) {
-        loc_eul_size_to_mat4(
-            gpl_dst->layer_mat, gpl_dst->location, gpl_dst->rotation, gpl_dst->scale);
-        bool do_onion = ((gpl_dst->onion_flag & GP_LAYER_ONIONSKIN) != 0);
-        bGPDframe *init_gpf = (do_onion) ? gpl_dst->frames.first : gpl_dst->actframe;
-        for (bGPDframe *gpf = init_gpf; gpf; gpf = gpf->next) {
-          LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
-            bGPDspoint *pt;
-            int i;
-            for (i = 0, pt = gps->points; i < gps->totpoints; i++, pt++) {
-              mul_m4_v3(gpl_dst->layer_mat, &pt->x);
-            }
-          }
-          /* if not onion, exit loop. */
-          if (!do_onion) {
-            break;
-          }
-        }
-      }
+static void greasepencil_free_data_ex(bGPdata *gpd)
+{
+  /* Collect all strokes into a single listbase. */
+  ListBase strokes = {0};
+  LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
+    if (gpl->frames.first == NULL) {
+      continue;
     }
 
-    BLI_addtail(&gpd_dst->layers, gpl_dst);
+    ListBase gpf_strokes = {0};
+    LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+      if (gpf->strokes.first == NULL) {
+        continue;
+      }
+
+      BLI_movelisttolist(&gpf_strokes, &gpf->strokes);
+    }
+    BLI_movelisttolist(&strokes, &gpf_strokes);
   }
+
+  /* Free all strokes in parallel. */
+  TaskParallelSettings settings = {0};
+  BLI_parallel_range_settings_defaults(&settings);
+  BLI_task_parallel_listbase(&strokes, NULL, parallel_free_stroke_cb, &settings);
+
+  /* Free the layers and frames. */
+  LISTBASE_FOREACH_MUTABLE (bGPDlayer *, gpl, &gpd->layers) {
+    LISTBASE_FOREACH_MUTABLE (bGPDframe *, gpf, &gpl->frames) {
+      BLI_freelinkN(&gpl->frames, gpf);
+    }
+    BKE_gpencil_free_layer_masks(gpl);
+    BLI_freelinkN(&gpd->layers, gpl);
+  }
+
+  MEM_SAFE_FREE(gpd->mat);
+  BLI_freelistN(&gpd->vertex_group_names);
+  BKE_gpencil_batch_cache_free(gpd);
+  BKE_gpencil_free_update_cache(gpd);
 }
 
 static void greasepencil_free_data(ID *id)
 {
-  /* Really not ideal, but for now will do... In theory custom behaviors like not freeing cache
-   * should be handled through specific API, and not be part of the generic one. */
-  BKE_gpencil_free_data((bGPdata *)id, true);
+  greasepencil_free_data_ex((bGPdata *)id);
 }
 
 static void greasepencil_foreach_id(ID *id, LibraryForeachIDData *data)
@@ -524,6 +642,8 @@ bGPDframe *BKE_gpencil_frame_addnew(bGPDlayer *gpl, int cframe)
   /* allocate memory for this frame */
   gpf = MEM_callocN(sizeof(bGPDframe), "bGPDframe");
   gpf->framenum = cframe;
+  unit_m4(gpf->transformation_mat);
+  copy_v2_fl(gpf->scale, 1.0f);
 
   /* find appropriate place to add frame */
   if (gpl->frames.first) {
@@ -736,7 +856,7 @@ bGPdata *BKE_gpencil_data_addnew(Main *bmain, const char name[])
   gpd->grid.lines = GP_DEFAULT_GRID_LINES;            /* Number of lines */
 
   /* Onion-skinning settings (data-block level) */
-  gpd->onion_keytype = -1; /* All by default. */
+  gpd->onion_keytype = GP_KEYFILTER_ALL; /* All by default. */
   gpd->onion_flag |= (GP_ONION_GHOST_PREVCOL | GP_ONION_GHOST_NEXTCOL);
   gpd->onion_flag |= GP_ONION_FADE;
   gpd->onion_mode = GP_ONION_MODE_RELATIVE;
@@ -983,6 +1103,7 @@ void BKE_gpencil_data_copy_settings(const bGPdata *gpd_src, bGPdata *gpd_dst)
 
   gpd_dst->onion_factor = gpd_src->onion_factor;
   gpd_dst->onion_mode = gpd_src->onion_mode;
+  gpd_dst->onion_space = gpd_src->onion_space;
   gpd_dst->onion_flag = gpd_src->onion_flag;
   gpd_dst->gstep = gpd_src->gstep;
   gpd_dst->gstep_next = gpd_src->gstep_next;
@@ -1036,6 +1157,10 @@ void BKE_gpencil_frame_copy_settings(const bGPDframe *gpf_src, bGPDframe *gpf_ds
   gpf_dst->flag = gpf_src->flag;
   gpf_dst->key_type = gpf_src->key_type;
   gpf_dst->framenum = gpf_src->framenum;
+  copy_m4_m4(gpf_dst->transformation_mat, gpf_src->transformation_mat);
+  copy_v2_v2(gpf_dst->offset, gpf_src->offset);
+  gpf_dst->angle = gpf_src->angle;
+  copy_v2_v2(gpf_dst->scale, gpf_src->scale);
 }
 
 void BKE_gpencil_stroke_copy_settings(const bGPDstroke *gps_src, bGPDstroke *gps_dst)
@@ -1057,33 +1182,29 @@ void BKE_gpencil_stroke_copy_settings(const bGPDstroke *gps_src, bGPDstroke *gps
   copy_v4_v4(gps_dst->vert_color_fill, gps_src->vert_color_fill);
 }
 
-bGPdata *BKE_gpencil_data_duplicate(Main *bmain, const bGPdata *gpd_src, bool internal_copy)
+void BKE_gpencil_data_duplicate(Main *bmain, const bGPdata *gpd_src, bGPdata **gpd_dst)
 {
-  bGPdata *gpd_dst;
-
-  /* Yuck and super-uber-hyper yuck!!!
-   * Should be replaceable with a no-main copy (LIB_ID_COPY_NO_MAIN etc.), but not sure about it,
-   * so for now keep old code for that one. */
-
   /* error checking */
   if (gpd_src == NULL) {
-    return NULL;
+    return;
   }
 
-  if (internal_copy) {
-    /* make a straight copy for undo buffers used during stroke drawing */
-    gpd_dst = MEM_dupallocN(gpd_src);
+  bGPdata *gpd_new = *gpd_dst;
+
+  if (bmain == NULL) {
+    if (gpd_new == NULL) {
+      *gpd_dst = MEM_dupallocN(gpd_src);
+      gpd_new = *gpd_dst;
+    }
+    else {
+      *gpd_new = *gpd_src;
+    }
+    greasepencil_copy_data(NULL, (ID *)gpd_new, (ID *)gpd_src, 0);
+    gpd_new->runtime.update_cache = NULL;
   }
   else {
-    BLI_assert(bmain != NULL);
-    gpd_dst = (bGPdata *)BKE_id_copy(bmain, &gpd_src->id);
+    *gpd_dst = (bGPdata *)BKE_id_copy(bmain, &gpd_src->id);
   }
-
-  /* Copy internal data (layers, etc.) */
-  greasepencil_copy_data(bmain, &gpd_dst->id, &gpd_src->id, 0);
-
-  /* return new */
-  return gpd_dst;
 }
 
 /* ************************************************** */
@@ -1226,6 +1347,16 @@ bGPDframe *BKE_gpencil_layer_frame_find(bGPDlayer *gpl, int cframe)
     }
   }
 
+  return NULL;
+}
+
+bGPDframe *BKE_gpencil_layer_frame_find_prev(bGPDlayer *gpl, int cframe)
+{
+  LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
+    if (gpf->next && gpf->next->framenum > cframe || gpf->next == NULL) {
+      return gpf;
+    }
+  }
   return NULL;
 }
 
@@ -2498,11 +2629,17 @@ void BKE_gpencil_visible_stroke_advanced_iter(ViewLayer *view_layer,
 
         int frame_len = 0;
         LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
-          gpf->runtime.frameid = frame_len++;
+          /* Check the bit in the onion_keytype flag to filter the keytype. */
+          const bool keytype_is_matching = ((1 << gpf->key_type) & onion_keytype) != 0;
+          if (keytype_is_matching || gpf == act_gpf) {
+            gpf->runtime.frameid = frame_len++;
+          }
+          else {
+            gpf->runtime.frameid = INT_MAX;
+          }
         }
 
         LISTBASE_FOREACH (bGPDframe *, gpf, &gpl->frames) {
-          bool is_wrong_keytype = (onion_keytype > -1) && (gpf->key_type != onion_keytype);
           bool is_in_range;
           int delta = (onion_mode_abs) ? (gpf->framenum - cfra) :
                                          (gpf->runtime.frameid - act_gpf->runtime.frameid);
@@ -2513,6 +2650,9 @@ void BKE_gpencil_visible_stroke_advanced_iter(ViewLayer *view_layer,
 
           if (onion_mode_sel) {
             is_in_range = (gpf->flag & GP_FRAME_SELECT) != 0;
+          }
+          else if (gpd->onion_mode == GP_ONION_MODE_TAGGED) {
+            is_in_range = (gpf->flag & GP_FRAME_ONION_SKIN_TAG) != 0;
           }
           else {
             is_in_range = (-delta <= gpd->gstep) && (delta <= gpd->gstep_next);
@@ -2527,7 +2667,8 @@ void BKE_gpencil_visible_stroke_advanced_iter(ViewLayer *view_layer,
             }
           }
           /* Mask frames that have wrong keytype of are not in range. */
-          gpf->runtime.onion_id = (is_wrong_keytype || !is_in_range) ? INT_MAX : delta;
+          gpf->runtime.onion_id = (is_in_range && gpf->runtime.frameid != INT_MAX) ? delta :
+                                                                                     INT_MAX;
         }
         /* Active frame is always shown. */
         if (!is_before_first || is_drawing) {
@@ -2652,20 +2793,94 @@ void BKE_gpencil_layer_original_pointers_update(const struct bGPDlayer *gpl_orig
   }
 }
 
+static void strokes_pointers_update_cb(void *UNUSED(userdata),
+                                       void *__restrict item,
+                                       int UNUSED(index),
+                                       const TaskParallelTLS *__restrict UNUSED(tls))
+{
+  bGPDstroke *gps_eval = (bGPDstroke *)item;
+  bGPDstroke *gps_orig = gps_eval->runtime.gps_orig;
+  /* Assign original point pointers. */
+  bGPDspoint *pt_orig;
+  bGPDspoint *pt_eval;
+  for (int i = 0; i < gps_orig->totpoints; i++) {
+    pt_orig = &gps_orig->points[i];
+    pt_eval = &gps_eval->points[i];
+    pt_orig->runtime.idx_orig = pt_eval->runtime.idx_orig = i;
+    pt_eval->runtime.pt_orig = pt_orig;
+  }
+}
+
 void BKE_gpencil_data_update_orig_pointers(const bGPdata *gpd_orig, const bGPdata *gpd_eval)
 {
-  /* Assign pointers to the original stroke and points to the evaluated data. This must
-   * be done before applying any modifier because at this moment the structure is equals,
-   * so we can assume the layer index is the same in both data-blocks.
-   * This data will be used by operators. */
-
   bGPDlayer *gpl_eval = gpd_eval->layers.first;
+
+  ListBase strokes = {0};
   LISTBASE_FOREACH (bGPDlayer *, gpl_orig, &gpd_orig->layers) {
-    if (gpl_eval != NULL) {
-      /* Update layer reference pointers. */
-      gpl_eval->runtime.gpl_orig = gpl_orig;
-      BKE_gpencil_layer_original_pointers_update(gpl_orig, gpl_eval);
+    gpl_eval->runtime.gpl_orig = gpl_orig;
+
+    if (BLI_listbase_is_empty(&gpl_orig->frames)) {
       gpl_eval = gpl_eval->next;
+      continue;
+    }
+
+    bGPDframe *gpf_eval = gpl_eval->frames.first;
+
+    ListBase gpf_strokes = {0};
+    LISTBASE_FOREACH (bGPDframe *, gpf_orig, &gpl_orig->frames) {
+      gpf_eval->runtime.gpf_orig = gpf_orig;
+      if (BLI_listbase_is_empty(&gpf_orig->strokes)) {
+        gpf_eval = gpf_eval->next;
+        continue;
+      }
+
+      bGPDstroke *gps_eval = gpf_eval->strokes.first;
+      LISTBASE_FOREACH (bGPDstroke *, gps_orig, &gpf_orig->strokes) {
+        gps_eval->runtime.gps_orig = gps_orig;
+        gps_eval = gps_eval->next;
+      }
+
+      if (gpf_strokes.first == NULL) {
+        gpf_strokes.first = gpf_eval->strokes.first;
+        gpf_strokes.last = gpf_eval->strokes.last;
+      }
+      else {
+        ((bGPDstroke *)gpf_strokes.last)->next = gpf_eval->strokes.first;
+        ((bGPDstroke *)gpf_eval->strokes.first)->prev = gpf_strokes.last;
+        gpf_strokes.last = gpf_eval->strokes.last;
+      }
+      gpf_eval = gpf_eval->next;
+    }
+
+    gpl_eval = gpl_eval->next;
+
+    if (BLI_listbase_is_empty(&gpf_strokes)) {
+      continue;
+    }
+
+    if (strokes.first == NULL) {
+      strokes.first = gpf_strokes.first;
+      strokes.last = gpf_strokes.last;
+    }
+    else {
+      ((bGPDstroke *)strokes.last)->next = gpf_strokes.first;
+      ((bGPDstroke *)gpf_strokes.first)->prev = strokes.last;
+      strokes.last = gpf_strokes.last;
+    }
+  }
+
+  /* Update the runtime pointers of all the strokes in the layer in parallel. */
+  TaskParallelSettings settings = {0};
+  settings.use_threading = true;
+  BLI_task_parallel_listbase(&strokes, NULL, strokes_pointers_update_cb, &settings);
+
+  /* Disconnect the stroke lists in the frames again. */
+  LISTBASE_FOREACH (bGPDlayer *, gpl_eval_iter, &gpd_eval->layers) {
+    LISTBASE_FOREACH (bGPDframe *, gpf_eval_iter, &gpl_eval_iter->frames) {
+      if (!BLI_listbase_is_empty(&gpf_eval_iter->strokes)) {
+        ((bGPDstroke *)gpf_eval_iter->strokes.first)->prev = NULL;
+        ((bGPDstroke *)gpf_eval_iter->strokes.last)->next = NULL;
+      }
     }
   }
 }
@@ -2677,7 +2892,40 @@ void BKE_gpencil_data_update_orig_pointers(const bGPdata *gpd_orig, const bGPdat
  */
 void BKE_gpencil_update_orig_pointers(const Object *ob_orig, const Object *ob_eval)
 {
+  /* Assign pointers to the original stroke and points to the evaluated data. This must
+   * be done before applying any modifier because at this moment the structure is equals,
+   * so we can assume the layer index is the same in both data-blocks.
+   * This data will be used by operators. */
   BKE_gpencil_data_update_orig_pointers((bGPdata *)ob_orig->data, (bGPdata *)ob_eval->data);
+}
+
+void BKE_gpencil_layer_parent_matrix_get(const Depsgraph *depsgraph,
+                                         Object *obact,
+                                         bGPDlayer *gpl,
+                                         float diff_mat[4][4])
+{
+  Object *ob_eval = depsgraph != NULL ? DEG_get_evaluated_object(depsgraph, obact) : obact;
+  Object *obparent = gpl->parent;
+  Object *obparent_eval = depsgraph != NULL ? DEG_get_evaluated_object(depsgraph, obparent) :
+                                              obparent;
+
+  unit_m4(diff_mat);
+
+  /* If layer is not parented, consider object matrix if valid. */
+  if (obparent_eval == NULL && (ob_eval != NULL && ob_eval->type == OB_GPENCIL)) {
+    copy_m4_m4(diff_mat, ob_eval->obmat);
+  }
+  /* Otherwise, build the parent matrix based on layer's parent type. */
+  else if (ELEM(gpl->partype, PAROBJECT, PARSKEL, PARBONE)) {
+    copy_m4_m4(diff_mat, obparent_eval->obmat);
+    if (gpl->partype == PARBONE) {
+      bPoseChannel *pchan = BKE_pose_channel_find_name(obparent_eval->pose, gpl->parsubstr);
+      /* If bone is valid, multiply by its matrix too. */
+      if (pchan) {
+        mul_m4_m4_post(diff_mat, pchan->pose_mat);
+      }
+    }
+  }
 }
 
 void BKE_gpencil_layer_transform_matrix_get(const Depsgraph *depsgraph,
@@ -2685,47 +2933,10 @@ void BKE_gpencil_layer_transform_matrix_get(const Depsgraph *depsgraph,
                                             bGPDlayer *gpl,
                                             float diff_mat[4][4])
 {
-  Object *ob_eval = depsgraph != NULL ? DEG_get_evaluated_object(depsgraph, obact) : obact;
-  Object *obparent = gpl->parent;
-  Object *obparent_eval = depsgraph != NULL ? DEG_get_evaluated_object(depsgraph, obparent) :
-                                              obparent;
-
-  /* if not layer parented, try with object parented */
-  if (obparent_eval == NULL) {
-    if ((ob_eval != NULL) && (ob_eval->type == OB_GPENCIL)) {
-      copy_m4_m4(diff_mat, ob_eval->obmat);
-      mul_m4_m4m4(diff_mat, diff_mat, gpl->layer_mat);
-      return;
-    }
-    /* not gpencil object */
-    unit_m4(diff_mat);
-    return;
-  }
-
-  if (ELEM(gpl->partype, PAROBJECT, PARSKEL)) {
-    mul_m4_m4m4(diff_mat, obparent_eval->obmat, gpl->inverse);
-    add_v3_v3(diff_mat[3], ob_eval->obmat[3]);
-    mul_m4_m4m4(diff_mat, diff_mat, gpl->layer_mat);
-    return;
-  }
-  if (gpl->partype == PARBONE) {
-    bPoseChannel *pchan = BKE_pose_channel_find_name(obparent_eval->pose, gpl->parsubstr);
-    if (pchan) {
-      float tmp_mat[4][4];
-      mul_m4_m4m4(tmp_mat, obparent_eval->obmat, pchan->pose_mat);
-      mul_m4_m4m4(diff_mat, tmp_mat, gpl->inverse);
-      add_v3_v3(diff_mat[3], ob_eval->obmat[3]);
-    }
-    else {
-      /* if bone not found use object (armature) */
-      mul_m4_m4m4(diff_mat, obparent_eval->obmat, gpl->inverse);
-      add_v3_v3(diff_mat[3], ob_eval->obmat[3]);
-    }
-    mul_m4_m4m4(diff_mat, diff_mat, gpl->layer_mat);
-    return;
-  }
-
-  unit_m4(diff_mat); /* not defined type */
+  BKE_gpencil_layer_parent_matrix_get(depsgraph, obact, gpl, diff_mat);
+  float tmp_mat[4][4];
+  loc_eul_size_to_mat4(tmp_mat, gpl->location, gpl->rotation, gpl->scale);
+  mul_m4_m4_post(diff_mat, tmp_mat);
 }
 
 void BKE_gpencil_update_layer_transforms(const Depsgraph *depsgraph, Object *ob)
@@ -2735,98 +2946,16 @@ void BKE_gpencil_update_layer_transforms(const Depsgraph *depsgraph, Object *ob)
   }
 
   bGPdata *gpd = (bGPdata *)ob->data;
-  float cur_mat[4][4];
+
+  /* Update cached inverse object matrix. */
+  invert_m4_m4(ob->imat, ob->obmat);
 
   LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
-    bool changed = false;
-    unit_m4(cur_mat);
-
-    /* Skip non-visible layers. */
-    if (gpl->flag & GP_LAYER_HIDE || is_zero_v3(gpl->scale)) {
-      continue;
-    }
-
-    /* Skip empty layers. */
-    if (BLI_listbase_is_empty(&gpl->frames)) {
-      continue;
-    }
-
-    /* Determine frame range to transform. */
-    bGPDframe *gpf_start = NULL;
-    bGPDframe *gpf_end = NULL;
-
-    /* If onion skinning is activated, consider all frames. */
-    if (gpl->onion_flag & GP_LAYER_ONIONSKIN) {
-      gpf_start = gpl->frames.first;
-    }
-    /* Otherwise, consider only active frame. */
-    else {
-      /* Skip layer if it has no active frame to transform. */
-      if (gpl->actframe == NULL) {
-        continue;
-      }
-      gpf_start = gpl->actframe;
-      gpf_end = gpl->actframe->next;
-    }
-
-    if (gpl->parent != NULL) {
-      Object *ob_parent = DEG_get_evaluated_object(depsgraph, gpl->parent);
-      /* calculate new matrix */
-      if (ELEM(gpl->partype, PAROBJECT, PARSKEL)) {
-        mul_m4_m4m4(cur_mat, ob->imat, ob_parent->obmat);
-      }
-      else if (gpl->partype == PARBONE) {
-        bPoseChannel *pchan = BKE_pose_channel_find_name(ob_parent->pose, gpl->parsubstr);
-        if (pchan != NULL) {
-          mul_m4_series(cur_mat, ob->imat, ob_parent->obmat, pchan->pose_mat);
-        }
-        else {
-          unit_m4(cur_mat);
-        }
-      }
-      changed = !equals_m4m4(gpl->inverse, cur_mat);
-    }
-
-    /* Calc local layer transform. Early out if we have non-animated zero transforms. */
-    bool transformed = ((!is_zero_v3(gpl->location)) || (!is_zero_v3(gpl->rotation)) ||
-                        (!is_one_v3(gpl->scale)));
-    float tmp_mat[4][4];
-    loc_eul_size_to_mat4(tmp_mat, gpl->location, gpl->rotation, gpl->scale);
-    transformed |= !equals_m4m4(gpl->layer_mat, tmp_mat);
-    if (transformed) {
-      copy_m4_m4(gpl->layer_mat, tmp_mat);
-    }
-
-    /* Continue if no transformations are applied to this layer. */
-    if (!changed && !transformed) {
-      continue;
-    }
-
-    /* Iterate over frame range. */
-    for (bGPDframe *gpf = gpf_start; gpf != NULL && gpf != gpf_end; gpf = gpf->next) {
-      /* Skip frames without a valid onion skinning id (NOTE: active frame has one). */
-      if (gpf->runtime.onion_id == INT_MAX) {
-        continue;
-      }
-
-      /* Apply transformations only if needed. */
-      if (changed || transformed) {
-        LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
-          bGPDspoint *pt;
-          int i;
-          for (i = 0, pt = gps->points; i < gps->totpoints; i++, pt++) {
-            if (changed) {
-              mul_m4_v3(gpl->inverse, &pt->x);
-              mul_m4_v3(cur_mat, &pt->x);
-            }
-
-            if (transformed) {
-              mul_m4_v3(gpl->layer_mat, &pt->x);
-            }
-          }
-        }
-      }
-    }
+    /* Get world space layer transformation matrix. */
+    BKE_gpencil_layer_transform_matrix_get(depsgraph, ob, gpl, gpl->layer_mat);
+    /* Compute and store layer matrix in object space. */
+    mul_m4_m4_pre(gpl->layer_mat, ob->imat);
+    invert_m4_m4(gpl->layer_invmat, gpl->layer_mat);
   }
 }
 
@@ -2907,6 +3036,7 @@ static bool gpencil_update_on_write_layer_cb(GPencilUpdateCache *gpl_cache, void
     td->gpl_eval->runtime.gpl_orig = gpl;
     return true;
   }
+
   if (gpl_cache->flag == GP_UPDATE_NODE_LIGHT_COPY) {
     BLI_assert(gpl != NULL);
     BKE_gpencil_layer_copy_settings(gpl, td->gpl_eval);
@@ -2947,6 +3077,7 @@ static bool gpencil_update_on_write_frame_cb(GPencilUpdateCache *gpf_cache, void
 
     return true;
   }
+
   if (gpf_cache->flag == GP_UPDATE_NODE_LIGHT_COPY) {
     BLI_assert(gpf != NULL);
     BKE_gpencil_frame_copy_settings(gpf, td->gpf_eval);
@@ -3034,11 +3165,15 @@ void BKE_gpencil_update_on_write(bGPdata *gpd_orig, bGPdata *gpd_eval)
   };
 
   BKE_gpencil_traverse_update_cache(update_cache, &ts, &data);
-
   gpd_eval->flag |= GP_DATA_CACHE_IS_DIRTY;
+}
 
-  /* TODO: This might cause issues when we have multiple depsgraphs? */
-  BKE_gpencil_free_update_cache(gpd_orig);
+void BKE_gpencil_frame_reset_transformation(bGPDframe *gpf)
+{
+  unit_m4(gpf->transformation_mat);
+  zero_v2(gpf->offset);
+  gpf->angle = 0.0f;
+  copy_v2_fl(gpf->scale, 1.0f);
 }
 
 /** \} */

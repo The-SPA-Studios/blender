@@ -415,6 +415,9 @@ static void gpencil_sbuffer_cache_populate(gpIterPopulateData *iter)
     DRW_shgroup_uniform_texture(iter->grp, "gpSceneDepthTexture", iter->pd->dummy_tx);
   }
 
+  /* Use object matrix for displaying sbuffer. */
+  DRW_shgroup_uniform_mat4_copy(iter->grp, "gpFrameMatrix", iter->ob->obmat);
+
   gpencil_stroke_cache_populate(NULL, NULL, iter->pd->sbuffer_stroke, iter);
   gpencil_drawcall_flush(iter);
 
@@ -430,6 +433,7 @@ static void gpencil_layer_cache_populate(bGPDlayer *gpl,
   gpIterPopulateData *iter = (gpIterPopulateData *)thunk;
   GPENCIL_PrivateData *pd = iter->pd;
   bGPdata *gpd = (bGPdata *)iter->ob->data;
+
 
   gpencil_drawcall_flush(iter);
 

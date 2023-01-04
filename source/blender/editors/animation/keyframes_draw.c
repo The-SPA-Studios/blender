@@ -38,6 +38,7 @@ void draw_keyframe_shape(float x,
                          float y,
                          float size,
                          bool sel,
+                         bool tag,
                          short key_type,
                          short mode,
                          float alpha,
@@ -155,6 +156,10 @@ void draw_keyframe_shape(float x,
     }
     if (extreme_type & GPU_KEYFRAME_SHAPE_ARROW_END_MIXED) {
       flags |= 0x400;
+    }
+
+    if (tag) {
+      flags |= 0x10;
     }
   }
 
@@ -369,6 +374,7 @@ static void draw_keylist_keys(const DrawKeylistUIData *ctx,
                           ypos,
                           ctx->icon_size,
                           (ak->sel & SELECT),
+                          (ak->sel & GP_FRAME_ONION_SKIN_TAG),
                           ak->key_type,
                           KEYFRAME_SHAPE_BOTH,
                           ctx->alpha,

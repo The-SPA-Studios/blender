@@ -35,6 +35,7 @@ struct View3D;
 struct wmOperatorType;
 
 struct Depsgraph;
+struct ToolSettings;
 
 struct EnumPropertyItem;
 struct PointerRNA;
@@ -486,6 +487,8 @@ void GPENCIL_OT_select_alternate(struct wmOperatorType *ot);
 void GPENCIL_OT_select_random(struct wmOperatorType *ot);
 void GPENCIL_OT_select_vertex_color(struct wmOperatorType *ot);
 
+void GPENCIL_OT_pick_active_layer(struct wmOperatorType *ot);
+
 void GPENCIL_OT_duplicate(struct wmOperatorType *ot);
 void GPENCIL_OT_delete(struct wmOperatorType *ot);
 void GPENCIL_OT_dissolve(struct wmOperatorType *ot);
@@ -661,11 +664,18 @@ void GPENCIL_OT_material_set(struct wmOperatorType *ot);
 void GPENCIL_OT_set_active_material(struct wmOperatorType *ot);
 void GPENCIL_OT_materials_copy_to_object(struct wmOperatorType *ot);
 
+/* shift & trace */
+void GPENCIL_OT_reset_frame_transforms(struct wmOperatorType *ot);
+void GPENCIL_OT_pick_frame_offset(struct wmOperatorType *ot);
+
 /* convert old 2.7 files to 2.8 */
 void GPENCIL_OT_convert_old_files(struct wmOperatorType *ot);
 
 /* armatures */
 void GPENCIL_OT_generate_weights(struct wmOperatorType *ot);
+
+void GPENCIL_OT_cache_ghost_frame_transformations(struct wmOperatorType *ot);
+void GPENCIL_OT_clear_ghost_frame_transformation_cache(struct wmOperatorType *ot);
 
 /* ****************************************************** */
 /* Stroke Iteration Utilities */
@@ -741,16 +751,20 @@ struct GP_EditableStrokes_Iter {
   { \
     struct GP_EditableStrokes_Iter gpstroke_iter = {{{0}}}; \
     Depsgraph *depsgraph_ = CTX_data_ensure_evaluated_depsgraph(C); \
+    ToolSettings *ts = CTX_data_tool_settings(C); \
     Object *obact_ = CTX_data_active_object(C); \
     bGPdata *gpd_ = CTX_data_gpencil_data(C); \
     const bool is_multiedit_ = (bool)GPENCIL_MULTIEDIT_SESSIONS_ON(gpd_); \
     CTX_DATA_BEGIN (C, bGPDlayer *, gpl, editable_gpencil_layers) { \
       bGPDframe *init_gpf_ = (is_multiedit_) ? gpl->frames.first : gpl->actframe; \
+      BKE_gpencil_layer_transform_matrix_get(depsgraph_, obact_, gpl, gpstroke_iter.diff_mat); \
+      invert_m4_m4(gpstroke_iter.inverse_diff_mat, gpstroke_iter.diff_mat); \
       for (bGPDframe *gpf_ = init_gpf_; gpf_; gpf_ = gpf_->next) { \
         if ((gpf_ == gpl->actframe) || ((gpf_->flag & GP_FRAME_SELECT) && is_multiedit_)) { \
-          BKE_gpencil_layer_transform_matrix_get( \
-              depsgraph_, obact_, gpl, gpstroke_iter.diff_mat); \
-          invert_m4_m4(gpstroke_iter.inverse_diff_mat, gpstroke_iter.diff_mat); \
+          if ((ts->gpencil_flags & GP_TOOL_FLAG_USE_FRAME_OFFSET_MATRIX) != 0) { \
+            mul_m4_m4m4( \
+                gpstroke_iter.diff_mat, gpstroke_iter.diff_mat, gpf_->transformation_mat); \
+          } \
           /* loop over strokes */ \
           bGPDstroke *gpsn_; \
           for (bGPDstroke *gps = gpf_->strokes.first; gps; gps = gpsn_) { \
@@ -789,6 +803,7 @@ struct GP_EditableStrokes_Iter {
   { \
     struct GP_EditableStrokes_Iter gpstroke_iter = {{{0}}}; \
     Depsgraph *depsgraph_ = CTX_data_ensure_evaluated_depsgraph(C); \
+    ToolSettings *ts = CTX_data_tool_settings(C); \
     Object *obact_ = CTX_data_active_object(C); \
     Object *ob_eval_ = (Object *)DEG_get_evaluated_id(depsgraph_, &obact_->id); \
     bGPdata *gpd_ = (bGPdata *)ob_eval_->data; \
@@ -796,12 +811,13 @@ struct GP_EditableStrokes_Iter {
     LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd_->layers) { \
       if (BKE_gpencil_layer_is_editable(gpl)) { \
         bGPDframe *init_gpf_ = (is_multiedit_) ? gpl->frames.first : gpl->actframe; \
+        BKE_gpencil_layer_transform_matrix_get(depsgraph_, obact_, gpl, gpstroke_iter.diff_mat); \
         for (bGPDframe *gpf_ = init_gpf_; gpf_; gpf_ = gpf_->next) { \
           if ((gpf_ == gpl->actframe) || ((gpf_->flag & GP_FRAME_SELECT) && is_multiedit_)) { \
-            BKE_gpencil_layer_transform_matrix_get( \
-                depsgraph_, obact_, gpl, gpstroke_iter.diff_mat); \
-            /* Undo layer transform. */ \
-            mul_m4_m4m4(gpstroke_iter.diff_mat, gpstroke_iter.diff_mat, gpl->layer_invmat); \
+            if ((ts->gpencil_flags & GP_TOOL_FLAG_USE_FRAME_OFFSET_MATRIX) != 0) { \
+              mul_m4_m4m4( \
+                  gpstroke_iter.diff_mat, gpstroke_iter.diff_mat, gpf_->transformation_mat); \
+            } \
             /* loop over strokes */ \
             LISTBASE_FOREACH (bGPDstroke *, gps, &gpf_->strokes) { \
               /* skip strokes that are invalid for current view */ \

@@ -640,6 +640,7 @@ typedef struct UserDef_Experimental {
   char use_cycles_debug;
   char show_asset_debug_info;
   char no_asset_indexing;
+  char use_gpencil_undo_system;
   char SANITIZE_AFTER_HERE;
   char _pad0;
   /* The following options are automatically sanitized (set to 0)
@@ -650,9 +651,11 @@ typedef struct UserDef_Experimental {
   char use_sculpt_tools_tilt;
   char use_extended_asset_browser;
   char use_override_templates;
+
   char enable_eevee_next;
   char use_sculpt_texture_paint;
   char use_draw_manager_acquire_lock;
+  char _pad1[7];
   /** `makesdna` does not allow empty structs. */
 } UserDef_Experimental;
 

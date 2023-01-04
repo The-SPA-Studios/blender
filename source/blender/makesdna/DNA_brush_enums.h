@@ -87,6 +87,12 @@ typedef enum eGPDbrush_Flag {
   GP_BRUSH_OCCLUDE_ERASER = (1 << 15),
   /* Post process trim stroke */
   GP_BRUSH_TRIM_STROKE = (1 << 16),
+  /* Only erase on the active layer. */
+  GP_BRUSH_ERASER_ACTIVE_LAYER = (1 << 17),
+  /* Use curve fitting to smooth the stroke. */
+  GP_BRUSH_USE_CURVE_SMOOTHING = (1 << 18),
+  /* Use smoothing while drawing the stroke. */
+  GP_BRUSH_USE_ACTIVE_SMOOTHING = (1 << 19),
 } eGPDbrush_Flag;
 
 typedef enum eGPDbrush_Flag2 {
@@ -132,6 +138,13 @@ typedef enum eGP_FillLayerModes {
   GP_FILL_GPLMODE_ABOVE = 4,
   GP_FILL_GPLMODE_BELOW = 5,
 } eGP_FillLayerModes;
+
+/* BrushGpencilSettings->sample_mode */
+typedef enum eGP_BrushSampleMode {
+  GP_BRUSH_SAMPLE_DEFAULT = 0,
+  GP_BRUSH_SAMPLE_FIXED = 1,
+  GP_BRUSH_SAMPLE_ADAPTIVE = 2,
+} eGP_BrushSampleMode;
 
 /* BrushGpencilSettings->gp_eraser_mode */
 typedef enum eGP_BrushEraserMode {

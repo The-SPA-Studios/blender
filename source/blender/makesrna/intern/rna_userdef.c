@@ -156,6 +156,7 @@ static const EnumPropertyItem rna_enum_userdef_viewport_aa_items[] = {
 #  include "BKE_pbvh.h"
 #  include "BKE_preferences.h"
 #  include "BKE_screen.h"
+#  include "BKE_undo_system.h"
 
 #  include "DEG_depsgraph.h"
 
@@ -705,6 +706,15 @@ static PointerRNA rna_Theme_space_gradient_get(PointerRNA *ptr)
 static PointerRNA rna_Theme_space_list_generic_get(PointerRNA *ptr)
 {
   return rna_pointer_inherit_refine(ptr, &RNA_ThemeSpaceListGeneric, ptr->data);
+}
+
+static void rna_use_gpencil_undo_system_update(Main *bmain, Scene *scene, PointerRNA *ptr)
+{
+  const bool value = RNA_boolean_get(ptr, "use_gpencil_undo_system");
+  if (value == false) {
+    wmWindowManager *wm = bmain->wm.first;
+    BKE_undosys_stack_clear(wm->undo_stack);
+  }
 }
 
 static const EnumPropertyItem *rna_userdef_audio_device_itemf(bContext *UNUSED(C),
@@ -6371,6 +6381,13 @@ static void rna_def_userdef_experimental(BlenderRNA *brna)
   RNA_def_property_boolean_sdna(prop, NULL, "use_override_templates", 1);
   RNA_def_property_ui_text(
       prop, "Override Templates", "Enable library override template in the python API");
+
+  prop = RNA_def_property(srna, "use_gpencil_undo_system", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "use_gpencil_undo_system", 1);
+  RNA_def_property_ui_text(prop,
+                           "GPencil Undo System",
+                           "Enable the grease pencil undo system that uses the update cache");
+  RNA_def_property_update(prop, 0, "rna_use_gpencil_undo_system_update");
 
   prop = RNA_def_property(srna, "enable_eevee_next", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, NULL, "enable_eevee_next", 1);

@@ -280,6 +280,7 @@ static void vicon_keytype_draw_wrapper(
                       yco,
                       (10.0f / 16.0f) * h,
                       sel,
+                      false,
                       key_type,
                       KEYFRAME_SHAPE_BOTH,
                       alpha,

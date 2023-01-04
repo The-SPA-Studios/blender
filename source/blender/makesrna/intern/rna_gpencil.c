@@ -60,6 +60,13 @@ static EnumPropertyItem rna_enum_gpencil_onion_modes_items[] = {
      "Keyframes",
      "Frames in relative range of the Grease Pencil keyframes"},
     {GP_ONION_MODE_SELECTED, "SELECTED", 0, "Selected", "Only selected keyframes"},
+    {GP_ONION_MODE_TAGGED, "TAGGED", 0, "Tagged", "Only tagged keyframes"},
+    {0, NULL, 0, NULL, NULL},
+};
+
+static EnumPropertyItem rna_enum_gpencil_onion_space_items[] = {
+    {GP_ONION_SPACE_LOCAL, "LOCAL", 0, "Local", ""},
+    {GP_ONION_SPACE_WORLD, "WORLD", 0, "World", ""},
     {0, NULL, 0, NULL, NULL},
 };
 
@@ -99,27 +106,27 @@ static const EnumPropertyItem rna_enum_onion_keyframe_type_items[] = {
      ICON_KEYTYPE_KEYFRAME_VEC,
      "Keyframe",
      "Normal keyframe - e.g. for key poses"},
-    {BEZT_KEYTYPE_BREAKDOWN,
-     "BREAKDOWN",
-     ICON_KEYTYPE_BREAKDOWN_VEC,
-     "Breakdown",
-     "A breakdown pose - e.g. for transitions between key poses"},
-    {BEZT_KEYTYPE_MOVEHOLD,
-     "MOVING_HOLD",
-     ICON_KEYTYPE_MOVING_HOLD_VEC,
-     "Moving Hold",
-     "A keyframe that is part of a moving hold"},
     {BEZT_KEYTYPE_EXTREME,
      "EXTREME",
      ICON_KEYTYPE_EXTREME_VEC,
      "Extreme",
      "An 'extreme' pose, or some other purpose as needed"},
+    {BEZT_KEYTYPE_BREAKDOWN,
+     "BREAKDOWN",
+     ICON_KEYTYPE_BREAKDOWN_VEC,
+     "Breakdown",
+     "A breakdown pose - e.g. for transitions between key poses"},
     {BEZT_KEYTYPE_JITTER,
      "JITTER",
      ICON_KEYTYPE_JITTER_VEC,
      "Jitter",
      "A filler or baked keyframe for keying on ones, or some other purpose as needed"},
     {0, NULL, 0, NULL, NULL},
+    {BEZT_KEYTYPE_MOVEHOLD,
+     "MOVING_HOLD",
+     ICON_KEYTYPE_MOVING_HOLD_VEC,
+     "Moving Hold",
+     "A keyframe that is part of a moving hold"},
 };
 
 static const EnumPropertyItem rna_enum_gplayer_move_type_items[] = {
@@ -166,10 +173,14 @@ static const EnumPropertyItem rna_enum_gpencil_caps_modes_items[] = {
 
 static void rna_GPencil_update(Main *UNUSED(bmain), Scene *UNUSED(scene), PointerRNA *ptr)
 {
-#  if 0
+#  if 1
+  bGPdata *gpd = (bGPdata *)(ptr->owner_id);
   /* In case a property on a layer changed, tag it with a light update. */
+  if (ptr->type == &RNA_GreasePencil) {
+    BKE_gpencil_tag_light_update(gpd, NULL, NULL, NULL);
+  }
   if (ptr->type == &RNA_GPencilLayer) {
-    BKE_gpencil_tag_light_update((bGPdata *)(ptr->owner_id), (bGPDlayer *)(ptr->data), NULL, NULL);
+    BKE_gpencil_tag_light_update(gpd, (bGPDlayer *)(ptr->data), NULL, NULL);
   }
 #  endif
   DEG_id_tag_update(ptr->owner_id, ID_RECALC_GEOMETRY);
@@ -540,9 +551,13 @@ static int rna_GPencil_active_layer_index_get(PointerRNA *ptr)
 static void rna_GPencil_active_layer_index_set(PointerRNA *ptr, int value)
 {
   bGPdata *gpd = (bGPdata *)ptr->owner_id;
-  bGPDlayer *gpl = BLI_findlink(&gpd->layers, value);
+  bGPDlayer *gpl_active = BLI_findlink(&gpd->layers, value);
 
-  BKE_gpencil_layer_active_set(gpd, gpl);
+  BKE_gpencil_layer_active_set(gpd, gpl_active);
+  LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
+    gpl->flag &= ~GP_LAYER_SELECT;
+  }
+  gpl_active->flag |= GP_LAYER_SELECT;
 
   /* Now do standard updates... */
   DEG_id_tag_update(&gpd->id, ID_RECALC_GEOMETRY);
@@ -1016,19 +1031,51 @@ static void rna_GPencil_frame_remove(bGPDlayer *layer, ReportList *reports, Poin
   WM_main_add_notifier(NC_GPENCIL | NA_EDITED, NULL);
 }
 
-static bGPDframe *rna_GPencil_frame_copy(bGPDlayer *layer, bGPDframe *src)
+static bGPDframe *rna_GPencil_frame_copy(ID *id, bGPDlayer *layer, bGPDframe *src, int frame_number)
 {
+  bGPdata *gpd = (bGPdata *)id;
   bGPDframe *frame = BKE_gpencil_frame_duplicate(src, true);
+
+  if (frame_number != -INT32_MAX) {
+    frame->framenum = frame_number;
+  }
 
   while (BKE_gpencil_layer_frame_find(layer, frame->framenum)) {
     frame->framenum++;
   }
+  BLI_addtail(&layer->frames, frame);  
+  BKE_gpencil_layer_frames_sort(layer, NULL);
 
-  BLI_addtail(&layer->frames, frame);
-
+  BKE_gpencil_tag_full_update(gpd, layer, NULL, NULL);
+  DEG_id_tag_update(id, ID_RECALC_GEOMETRY);
   WM_main_add_notifier(NC_GPENCIL | NA_EDITED, NULL);
-
   return frame;
+}
+
+static void rna_GPencil_frame_transform(ID *id, bGPDframe *frame, float matrix[16])
+{
+  bGPdata *gpd = (bGPdata *)id;
+
+  /* We have to find the layer here. */
+  bGPDlayer *layer;
+  LISTBASE_FOREACH (bGPDlayer *, gpl, &gpd->layers) {
+    if (BLI_findindex(&gpl->frames, frame) > 0) {
+      layer = gpl;
+      break;
+    }
+  }
+
+  float scale = sqrtf(fabsf(determinant_m4((float(*)[4])matrix)));
+  LISTBASE_FOREACH (bGPDstroke *, gps, &frame->strokes) {
+    for (int i = 0; i < gps->totpoints; i++) {
+      bGPDspoint *pt = &gps->points[i];
+      mul_m4_v3((float(*)[4])matrix, &pt->x);
+      pt->pressure *= scale;
+    }
+  }
+
+  BKE_gpencil_tag_full_update(gpd, layer, frame, NULL);
+  WM_main_add_notifier(NC_GPENCIL | NA_EDITED, NULL);
 }
 
 static bGPDlayer *rna_GPencil_layer_new(bGPdata *gpd, const char *name, bool setactive)
@@ -1643,6 +1690,13 @@ static void rna_def_gpencil_stroke(BlenderRNA *brna)
   RNA_def_property_ui_text(prop, "Cyclic", "Enable cyclic drawing, closing the stroke");
   RNA_def_property_update(prop, 0, "rna_GPencil_update");
 
+  /* Enable/Disable automatic fill uv regeneration. */
+  prop = RNA_def_property(srna, "use_automatic_uvs", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, NULL, "flag", GP_STROKE_NO_AUTOMATIC_FILL_UVS);
+  RNA_def_property_ui_text(
+      prop, "Automatic Fill UVs", "Enable automatic regeneration of fill UVs");
+  RNA_def_property_update(prop, 0, "rna_GPencil_update");
+
   /* The stroke has Curve Edit data. */
   prop = RNA_def_property(srna, "has_edit_curve", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_funcs(prop, "rna_stroke_has_edit_curve_get", NULL);
@@ -1788,6 +1842,7 @@ static void rna_def_gpencil_frame(BlenderRNA *brna)
   PropertyRNA *prop;
 
   FunctionRNA *func;
+  PropertyRNA *parm;
 
   srna = RNA_def_struct(brna, "GPencilFrame", NULL);
   RNA_def_struct_sdna(srna, "bGPDframe");
@@ -1807,6 +1862,7 @@ static void rna_def_gpencil_frame(BlenderRNA *brna)
   /* XXX NOTE: this cannot occur on the same frame as another sketch. */
   RNA_def_property_range(prop, -MAXFRAME, MAXFRAME);
   RNA_def_property_ui_text(prop, "Frame Number", "The frame on which this sketch appears");
+  RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
 
   prop = RNA_def_property(srna, "keyframe_type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, NULL, "key_type");
@@ -1825,9 +1881,43 @@ static void rna_def_gpencil_frame(BlenderRNA *brna)
   RNA_def_property_boolean_sdna(prop, NULL, "flag", GP_FRAME_SELECT);
   RNA_def_property_ui_text(prop, "Select", "Frame is selected for editing in the Dope Sheet");
 
+  prop = RNA_def_property(srna, "tag", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "flag", GP_FRAME_ONION_SKIN_TAG);
+  RNA_def_property_ui_text(prop, "Tag", "Frame is tagged for editing in the Dope Sheet");
+
+  prop = RNA_def_property(srna, "offset", PROP_FLOAT, PROP_MATRIX);
+  RNA_def_property_float_sdna(prop, NULL, "transformation_mat");
+  RNA_def_property_multi_array(prop, 2, rna_matrix_dimsize_4x4);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Offset", "Offset matrix for shift & trace");
+  RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
+
+  prop = RNA_def_property(srna, "translation", PROP_FLOAT, PROP_MATRIX);
+  RNA_def_property_float_sdna(prop, NULL, "offset");
+  RNA_def_property_array(prop, 2);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Translation", "Translation in 2d space");
+  RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
+
   /* API */
   func = RNA_def_function(srna, "clear", "rna_GPencil_frame_clear");
   RNA_def_function_ui_description(func, "Remove all the grease pencil frame data");
+
+  func = RNA_def_function(srna, "transform", "rna_GPencil_frame_transform");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID);
+  RNA_def_function_ui_description(func, "Transform all strokes of a grease pencil frame");
+  parm = RNA_def_float_matrix(func,
+                              "matrix",
+                              4,
+                              4,
+                              NULL,
+                              -FLT_MAX,
+                              FLT_MAX,
+                              "Matrix",
+                              "The transformation matrix to use",
+                              -FLT_MAX,
+                              FLT_MAX);
+  RNA_def_parameter_flags(parm, 0, PARM_REQUIRED);
 }
 
 static void rna_def_gpencil_frames_api(BlenderRNA *brna, PropertyRNA *cprop)
@@ -1867,9 +1957,19 @@ static void rna_def_gpencil_frames_api(BlenderRNA *brna, PropertyRNA *cprop)
   RNA_def_parameter_clear_flags(parm, PROP_THICK_WRAP, 0);
 
   func = RNA_def_function(srna, "copy", "rna_GPencil_frame_copy");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID);
   RNA_def_function_ui_description(func, "Copy a grease pencil frame");
   parm = RNA_def_pointer(func, "source", "GPencilFrame", "Source", "The source frame");
   RNA_def_parameter_flags(parm, PROP_NEVER_NULL, PARM_REQUIRED);
+  RNA_def_int(func,
+              "frame_number",
+              -INT32_MAX,
+              MINAFRAME,
+              MAXFRAME,
+              "Frame Number",
+              "The frame on which to place the duplicate frame",
+              MINAFRAME,
+              MAXFRAME);
   parm = RNA_def_pointer(func, "copy", "GPencilFrame", "", "The newly copied frame");
   RNA_def_function_return(func, parm);
 }
@@ -2658,11 +2758,18 @@ static void rna_def_gpencil_data(BlenderRNA *brna)
   RNA_def_property_ui_text(prop, "Mode", "Mode to display frames");
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
 
-  prop = RNA_def_property(srna, "onion_keyframe_type", PROP_ENUM, PROP_NONE);
-  RNA_def_property_enum_sdna(prop, NULL, "onion_keytype");
+  prop = RNA_def_property(srna, "onion_space", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, NULL, "onion_space");
+  RNA_def_property_enum_items(prop, rna_enum_gpencil_onion_space_items);
   RNA_def_parameter_clear_flags(prop, PROP_ANIMATABLE, 0);
-  RNA_def_property_enum_items(prop, rna_enum_onion_keyframe_type_items);
+  RNA_def_property_ui_text(prop, "Space", "Space of the ghost frames");
+  RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
+
+  prop = RNA_def_property(srna, "onion_keyframe_type", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "onion_keytype", GP_KEYFILTER_KEYFRAME);
+  RNA_def_property_array(prop, BEZT_KEYTYPE_TOT);
   RNA_def_property_ui_text(prop, "Filter by Type", "Type of keyframe (for filtering)");
+  RNA_def_parameter_clear_flags(prop, PROP_ANIMATABLE, 0);
   RNA_def_property_update(prop, NC_GPENCIL | ND_DATA, "rna_GPencil_update");
 
   prop = RNA_def_property(srna, "use_onion_fade", PROP_BOOLEAN, PROP_NONE);

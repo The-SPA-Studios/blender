@@ -347,6 +347,8 @@ typedef enum eGPDstroke_Flag {
   /* Flag to indicated that the editcurve has been changed and the stroke needs to be updated with
    * the curve data */
   GP_STROKE_NEEDS_CURVE_UPDATE = (1 << 9),
+  /* Disables the automatic regeneration of fill UVs. */
+  GP_STROKE_NO_AUTOMATIC_FILL_UVS = (1 << 10),
   /* only for use with stroke-buffer (while drawing arrows) */
   GP_STROKE_USE_ARROW_START = (1 << 12),
   /* only for use with stroke-buffer (while drawing arrows) */
@@ -390,8 +392,16 @@ typedef struct bGPDframe_Runtime {
   /** Onion offset from active frame. 0 if not onion. INT_MAX to bypass frame. */
   int onion_id;
 
+  float transform[4][4];
+  /** 0 = transform cache is invalid, 1 = transform cache is invalid. */
+  short transform_valid;
+  char _pad[6];
+
   /** Original frame (used to dereference evaluated data) */
   struct bGPDframe *gpf_orig;
+
+  /* Cached parent transfromation matrix for this frame (at its specific time). */
+  float inv_parent_matrix[4][4];
 } bGPDframe_Runtime;
 
 /* Grease-Pencil Annotations - 'Frame'
@@ -413,6 +423,12 @@ typedef struct bGPDframe {
   /** Keyframe type (eBezTriple_KeyframeType). */
   short key_type;
 
+  /** Transformation matrix used for shift & trace (object space). */
+  float transformation_mat[4][4];
+  /** Individual transformation components (2d transformation plane space). */
+  float offset[2], angle, scale[2];
+  int _pad;
+
   /* NOTE: When adding new members, make sure to add them to BKE_gpencil_frame_copy_settings as
    * well! */
 
@@ -427,6 +443,8 @@ typedef enum eGPDframe_Flag {
   GP_FRAME_SELECT = (1 << 1),
   /* Line Art generation */
   GP_FRAME_LRT_CLEARED = (1 << 2),
+  /* Used by the tagged onion skin mode. */
+  GP_FRAME_ONION_SKIN_TAG = (1 << 3),
 } eGPDframe_Flag;
 
 /* ***************************************** */
@@ -461,6 +479,10 @@ typedef struct bGPDlayer_Runtime {
   char _pad[4];
   /** Original layer (used to dereference evaluated data) */
   struct bGPDlayer *gpl_orig;
+
+  /* Temp tagging. */
+  short tag;
+  char _pad2[6];
 } bGPDlayer_Runtime;
 
 /* Grease-Pencil Annotations - 'Layer' */
@@ -651,7 +673,6 @@ typedef struct bGPdata_Runtime {
   Brush *sbuffer_brush;
   struct GpencilBatchCache *gpencil_cache;
   struct LineartCache *lineart_cache;
-
   struct GPencilUpdateCache *update_cache;
 } bGPdata_Runtime;
 
@@ -707,6 +728,9 @@ typedef struct bGPdata {
   int onion_mode;
   /** Onion skinning flags (eGPD_OnionFlag). */
   int onion_flag;
+  /** Onion skinning space (eGPD_OnionSpace). */
+  int onion_space;
+  char _pad3[4];
   /**
    * Ghosts Before: max number of ghost frames to show between
    * active frame and the one before it (0 = only the ghost itself).
@@ -738,7 +762,7 @@ typedef struct bGPdata {
 
   /** Draw mode for strokes (eGP_DrawMode). */
   short draw_mode;
-  /** Keyframe type for onion filter  (eBezTriple_KeyframeType plus All option) */
+  /** Keyframe type for onion filter  (eBezTriple_KeyframeType plus All option: -1) */
   short onion_keytype;
 
   /** Stroke selection last index. Used to generate a unique selection index. */
@@ -821,6 +845,9 @@ typedef enum eGPdata_Flag {
   GP_DATA_CURVE_EDIT_MODE = (1 << 21),
   /* Use adaptive curve resolution */
   GP_DATA_CURVE_ADAPTIVE_RESOLUTION = (1 << 22),
+  /* Update cache was fully dealt with and is ready to be freed. In this state, it should no longer
+     be written to (but still can be read). */
+  GP_DATA_UPDATE_CACHE_DISPOSABLE = (1 << 23),
 } eGPdata_Flag;
 
 /* gpd->onion_flag */
@@ -842,7 +869,23 @@ typedef enum eGP_OnionModes {
   GP_ONION_MODE_ABSOLUTE = 0,
   GP_ONION_MODE_RELATIVE = 1,
   GP_ONION_MODE_SELECTED = 2,
+  GP_ONION_MODE_TAGGED = 3,
 } eGP_OnionModes;
+
+/* gpd->onion_space */
+typedef enum eGP_OnionSpace {
+  GP_ONION_SPACE_LOCAL = 0,
+  GP_ONION_SPACE_WORLD = 1,
+} eGP_OnionSpace;
+
+/* gpd->onion_keytype */
+typedef enum eGP_KeyframeFilter {
+  GP_KEYFILTER_KEYFRAME = (1 << 0),
+  GP_KEYFILTER_EXTREME = (1 << 1),
+  GP_KEYFILTER_BREAKDOWN = (1 << 2),
+  GP_KEYFILTER_JITTER = (1 << 3),
+  GP_KEYFILTER_MOVEHOLD = (1 << 4),
+} eGP_KeyframeFilter;
 
 /* xray modes (Depth Ordering) */
 typedef enum eGP_DepthOrdering {
@@ -902,6 +945,15 @@ typedef enum eGP_DrawMode {
             GP_VERTEX_MASK_SELECTMODE_SEGMENT)))
 
 #define GPENCIL_PLAY_ON(gpd) ((gpd) && ((gpd)->runtime.playing == 1))
+
+#define GP_KEYFILTER_ALL \
+  (GP_KEYFILTER_KEYFRAME | GP_KEYFILTER_EXTREME | GP_KEYFILTER_BREAKDOWN | GP_KEYFILTER_JITTER | \
+   GP_KEYFILTER_MOVEHOLD)
+
+/* Macro to check whether grease pencil frame offset matrix is used. */
+#define GP_USE_FRAME_OFFSET_MATRIX(scene, gpd) \
+  ((scene->toolsettings->gpencil_flags & GP_TOOL_FLAG_USE_FRAME_OFFSET_MATRIX) && \
+   (GPENCIL_PAINT_MODE(gpd) || GPENCIL_SCULPT_MODE(gpd) || GPENCIL_EDIT_MODE(gpd)))
 
 #ifdef __cplusplus
 }

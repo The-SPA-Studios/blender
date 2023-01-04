@@ -28,6 +28,9 @@ def dopesheet_filter(layout, context):
     is_nla = context.area.type == 'NLA_EDITOR'
 
     row = layout.row(align=True)
+    row.prop(dopesheet, "sync_selection", text="")
+
+    row = layout.row(align=True)
     row.prop(dopesheet, "show_only_selected", text="")
     row.prop(dopesheet, "show_hidden", text="")
 
@@ -55,7 +58,9 @@ class DopesheetFilterPopoverBase:
         is_nla = context.area.type == 'NLA_EDITOR'
 
         col = layout.column(align=True)
-        col.prop(dopesheet, "show_only_selected", icon='NONE')
+        row = col.row(align=True)
+        row.prop(dopesheet, "show_only_selected", icon='NONE')
+        row.prop(dopesheet, "show_active_object", icon_only=True)
         col.prop(dopesheet, "show_hidden", icon='NONE')
 
         if is_nla:
@@ -185,6 +190,46 @@ class DOPESHEET_PT_filters(DopesheetFilterPopoverBase, Panel):
             DopesheetFilterPopoverBase.draw_standard_filters(context, layout)
 
 
+# Header buttons for dopesheet header (play, etc.)
+class DOPESHEET_HT_timeline_buttons:
+    @staticmethod
+    def draw_header(context, layout):
+        scene = context.scene
+        tool_settings = context.tool_settings
+        screen = context.screen
+
+        layout.separator_spacer()
+
+        row = layout.row(align=True)
+        row.prop(tool_settings, "use_keyframe_insert_auto", text="", toggle=True)
+        sub = row.row(align=True)
+        sub.active = tool_settings.use_keyframe_insert_auto
+        sub.popover(
+            panel="TIME_PT_auto_keyframing",
+            text="",
+        )
+
+        row = layout.row(align=True)
+        row.operator("screen.frame_jump", text="", icon='REW').end = False
+        row.operator("screen.keyframe_jump", text="", icon='PREV_KEYFRAME').next = False
+        if not screen.is_animation_playing:
+            # if using JACK and A/V sync:
+            #   hide the play-reversed button
+            #   since JACK transport doesn't support reversed playback
+            if scene.sync_mode == 'AUDIO_SYNC' and context.preferences.system.audio_device == 'JACK':
+                row.scale_x = 2
+                row.operator("screen.animation_play", text="", icon='PLAY')
+                row.scale_x = 1
+            else:
+                row.operator("screen.animation_play", text="", icon='PLAY_REVERSE').reverse = True
+                row.operator("screen.animation_play", text="", icon='PLAY')
+        else:
+            row.scale_x = 2
+            row.operator("screen.animation_play", text="", icon='PAUSE')
+            row.scale_x = 1
+        row.operator("screen.keyframe_jump", text="", icon='NEXT_KEYFRAME').next = True
+        row.operator("screen.frame_jump", text="", icon='FF').end = True
+
 #######################################
 # DopeSheet Editor - General/Standard UI
 
@@ -209,6 +254,7 @@ class DOPESHEET_HT_header(Header):
             layout.prop(st, "ui_mode", text="")
 
             DOPESHEET_MT_editor_menus.draw_collapsible(context, layout)
+            DOPESHEET_HT_timeline_buttons.draw_header(context, layout)
             DOPESHEET_HT_editor_buttons.draw_header(context, layout)
 
 
@@ -236,26 +282,26 @@ class DOPESHEET_HT_editor_buttons:
             layout.template_ID(st, "action", new="action.new", unlink="action.unlink")
 
         # Layer management
-        if st.mode == 'GPENCIL':
-            ob = context.active_object
-            selected = st.dopesheet.show_only_selected
-            enable_but = selected and ob is not None and ob.type == 'GPENCIL'
 
-            row = layout.row(align=True)
-            row.enabled = enable_but
-            row.operator("gpencil.layer_add", icon='ADD', text="")
-            row.operator("gpencil.layer_remove", icon='REMOVE', text="")
-            row.menu("GPENCIL_MT_layer_context_menu", icon='DOWNARROW_HLT', text="")
+        ob = context.active_object
+        selected = st.dopesheet.show_only_selected
+        enable_but = ob is not None and ob.type == 'GPENCIL'
 
-            row = layout.row(align=True)
-            row.enabled = enable_but
-            row.operator("gpencil.layer_move", icon='TRIA_UP', text="").type = 'UP'
-            row.operator("gpencil.layer_move", icon='TRIA_DOWN', text="").type = 'DOWN'
+        row = layout.row(align=True)
+        row.enabled = enable_but
+        row.operator("gpencil.layer_add", icon='ADD', text="")
+        row.operator("gpencil.layer_remove", icon='REMOVE', text="")
+        row.menu("GPENCIL_MT_layer_context_menu", icon='DOWNARROW_HLT', text="")
 
-            row = layout.row(align=True)
-            row.enabled = enable_but
-            row.operator("gpencil.layer_isolate", icon='RESTRICT_VIEW_ON', text="").affect_visibility = True
-            row.operator("gpencil.layer_isolate", icon='LOCKED', text="").affect_visibility = False
+        row = layout.row(align=True)
+        row.enabled = enable_but
+        row.operator("gpencil.layer_move", icon='TRIA_UP', text="").type = 'UP'
+        row.operator("gpencil.layer_move", icon='TRIA_DOWN', text="").type = 'DOWN'
+
+        row = layout.row(align=True)
+        row.enabled = enable_but
+        row.operator("gpencil.layer_isolate", icon='RESTRICT_VIEW_ON', text="").affect_visibility = True
+        row.operator("gpencil.layer_isolate", icon='LOCKED', text="").affect_visibility = False
 
         layout.separator_spacer()
 

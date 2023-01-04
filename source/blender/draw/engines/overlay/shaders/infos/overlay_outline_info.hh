@@ -69,6 +69,7 @@ GPU_SHADER_CREATE_INFO(overlay_outline_prepass_gpencil)
     .vertex_source("overlay_outline_prepass_gpencil_vert.glsl")
     .push_constant(Type::BOOL, "gpStrokeOrder3d") /* TODO(fclem): Move to a GPencil object UBO. */
     .push_constant(Type::VEC4, "gpDepthPlane")    /* TODO(fclem): Move to a GPencil object UBO. */
+    .push_constant(Type::MAT4, "gpFrameMatrix")
     /* Using uint because 16bit uint can contain more ids than int. */
     .fragment_out(0, Type::UINT, "out_object_id")
     .fragment_source("overlay_outline_prepass_gpencil_frag.glsl")

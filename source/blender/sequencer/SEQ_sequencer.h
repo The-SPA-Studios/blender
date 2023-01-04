@@ -18,6 +18,7 @@ struct BlendExpander;
 struct BlendLibReader;
 struct BlendWriter;
 struct Depsgraph;
+struct bContext;
 struct Editing;
 struct Scene;
 struct Sequence;
@@ -155,6 +156,8 @@ void SEQ_sequence_lookup_free(const struct Scene *scene);
  * \param tag: tag to set
  */
 void SEQ_sequence_lookup_tag(const struct Scene *scene, eSequenceLookupTag tag);
+
+struct Scene *SEQ_get_ref_scene_for_notifiers(const struct bContext *C);
 
 #ifdef __cplusplus
 }

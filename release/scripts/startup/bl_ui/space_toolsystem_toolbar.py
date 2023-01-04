@@ -2087,6 +2087,40 @@ class _defs_gpencil_paint:
             draw_settings=draw_settings,
         )
 
+    @ToolDef.from_fn
+    def quick_edit():
+        def draw_settings(context, layout, tool):
+            ts = context.tool_settings
+            layout.prop(ts, "use_gpencil_only_active_layer", text="Use Only Active Layer")
+
+        return dict(
+            idname="builtin.select_lasso",
+            label="Quick Edit",
+            icon="ops.generic.select_lasso",
+            widget="VIEW3D_GGT_gpencil_xform_box",
+            keymap=(),
+            draw_settings=draw_settings,
+        )
+
+    @ToolDef.from_fn
+    def shift_and_trace():
+        def draw_settings(context, layout, tool):
+            frame_offset_settings = context.scene.tool_settings.gpencil_frame_offset
+            row = layout.row(align=True)
+            row.prop(frame_offset_settings, "use_current_frame")
+            subrow = row.row()
+            subrow.enabled = not frame_offset_settings.use_current_frame
+            subrow.prop(frame_offset_settings, "frame")
+            layout.operator("gpencil.reset_frame_transforms", text="Reset").type = 'ACTIVE'
+
+        return dict(
+            idname="builtin.transform",
+            label="Shift & Trace",
+            icon="ops.transform.transform",
+            widget="VIEW3D_GGT_gpencil_frame_offset",
+            keymap="3D View Tool: Edit Gpencil, Frame Offset",
+            draw_settings=draw_settings,
+        )
 
 class _defs_gpencil_edit:
     def is_segment(context):
@@ -2113,8 +2147,10 @@ class _defs_gpencil_edit:
     @ToolDef.from_fn
     def select():
         def draw_settings(context, layout, _tool):
+            ts = context.tool_settings
             if _defs_gpencil_edit.is_segment(context):
-                layout.prop(context.tool_settings.gpencil_sculpt, "intersection_threshold")
+                layout.prop(ts.gpencil_sculpt, "intersection_threshold")
+            layout.prop(ts, "use_gpencil_only_active_layer", text="Use Only Active Layer")
         return dict(
             idname="builtin.select",
             label="Tweak",
@@ -2127,12 +2163,14 @@ class _defs_gpencil_edit:
     @ToolDef.from_fn
     def box_select():
         def draw_settings(context, layout, tool):
+            ts = context.tool_settings
             props = tool.operator_properties("gpencil.select_box")
             row = layout.row()
             row.use_property_split = False
             row.prop(props, "mode", text="", expand=True, icon_only=True)
             if _defs_gpencil_edit.is_segment(context):
-                layout.prop(context.tool_settings.gpencil_sculpt, "intersection_threshold")
+                layout.prop(ts.gpencil_sculpt, "intersection_threshold")
+            layout.prop(ts, "use_gpencil_only_active_layer", text="Use Only Active Layer")
         return dict(
             idname="builtin.select_box",
             label="Select Box",
@@ -2149,8 +2187,10 @@ class _defs_gpencil_edit:
             row = layout.row()
             row.use_property_split = False
             row.prop(props, "mode", text="", expand=True, icon_only=True)
+            ts = context.tool_settings
             if _defs_gpencil_edit.is_segment(context):
-                layout.prop(context.tool_settings.gpencil_sculpt, "intersection_threshold")
+                layout.prop(ts.gpencil_sculpt, "intersection_threshold")
+            layout.prop(ts, "use_gpencil_only_active_layer", text="Use Only Active Layer")
         return dict(
             idname="builtin.select_lasso",
             label="Select Lasso",
@@ -2168,8 +2208,10 @@ class _defs_gpencil_edit:
             row.use_property_split = False
             row.prop(props, "mode", text="", expand=True, icon_only=True)
             layout.prop(props, "radius")
+            ts = context.tool_settings
             if _defs_gpencil_edit.is_segment(context):
-                layout.prop(context.tool_settings.gpencil_sculpt, "intersection_threshold")
+                layout.prop(ts.gpencil_sculpt, "intersection_threshold")
+            layout.prop(ts, "use_gpencil_only_active_layer", text="Use Only Active Layer")
 
         def draw_cursor(_context, tool, xy):
             from gpu_extras.presets import draw_circle_2d
@@ -3104,7 +3146,10 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
             _defs_gpencil_paint.generate_from_brushes,
             _defs_gpencil_paint.cutter,
             None,
+            _defs_gpencil_paint.quick_edit,
             _defs_gpencil_paint.eyedropper,
+            None,
+            _defs_gpencil_paint.shift_and_trace,
             None,
             _defs_gpencil_paint.line,
             _defs_gpencil_paint.polyline,

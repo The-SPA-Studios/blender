@@ -92,6 +92,7 @@ void ED_spacetypes_init(void)
   ED_operatortypes_animchannels();
   ED_operatortypes_asset();
   ED_operatortypes_gpencil();
+  ED_operatortypes_paint_gpencil();
   ED_operatortypes_object();
   ED_operatortypes_lattice();
   ED_operatortypes_mesh();
@@ -130,6 +131,7 @@ void ED_spacetypes_init(void)
   ED_gizmotypes_cage_2d();
   ED_gizmotypes_cage_3d();
   ED_gizmotypes_snap_3d();
+  ED_gizmotypes_plane3d();
 
   /* Register types for operators and gizmos. */
   const ListBase *spacetypes = BKE_spacetypes_list();

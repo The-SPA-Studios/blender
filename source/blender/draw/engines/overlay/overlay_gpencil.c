@@ -22,6 +22,14 @@
 #include "draw_common.h"
 #include "draw_manager_text.h"
 
+typedef struct gpOverlayIterPopulateData {
+  OVERLAY_PrivateData *pd;
+  View3D *v3d;
+  Object *ob;
+  bGPdata *gpd;
+  bool use_frame_offset;
+} gpOverlayIterPopulateData;
+
 void OVERLAY_edit_gpencil_cache_init(OVERLAY_Data *vedata)
 {
   OVERLAY_PassList *psl = vedata->psl;
@@ -316,6 +324,65 @@ void OVERLAY_gpencil_cache_init(OVERLAY_Data *vedata)
   }
 }
 
+static int gpencil_stroke_is_cyclic(const bGPDstroke *gps)
+{
+  return ((gps->flag & GP_STROKE_CYCLIC) != 0) && (gps->totpoints > 2);
+}
+
+static void edit_gpencil_overlay_cache_populate_layer_cb(bGPDlayer *gpl,
+                                                         bGPDframe *gpf,
+                                                         bGPDstroke *UNUSED(gps_),
+                                                         void *thunk)
+{
+  if (gpf == NULL) {
+    return;
+  }
+
+  gpOverlayIterPopulateData *data = (gpOverlayIterPopulateData *)thunk;
+  OVERLAY_PrivateData *pd = data->pd;
+  View3D *v3d = data->v3d;
+  Object *ob = data->ob;
+  bGPdata *gpd = data->gpd;
+
+  float frame_mat[4][4];
+  copy_m4_m4(frame_mat, ob->obmat);
+  mul_m4_m4_post(frame_mat, gpl->layer_mat);
+  if (data->use_frame_offset) {
+    mul_m4_m4_post(frame_mat, gpf->transformation_mat);
+  }
+
+  int count = 0;
+  LISTBASE_FOREACH (bGPDstroke *, gps, &gpf->strokes) {
+    count += gps->totpoints + 2 + gpencil_stroke_is_cyclic(gps);
+  }
+
+  if (count == 0) {
+    return;
+  }
+
+  int start = ((bGPDstroke *)(gpf->strokes.first))->runtime.stroke_start;
+
+  if (pd->edit_gpencil_wires_grp) {
+    DRWShadingGroup *grp = DRW_shgroup_create_sub(pd->edit_gpencil_wires_grp);
+    DRW_shgroup_uniform_vec4_copy(grp, "gpEditColor", gpd->line_color);
+    DRW_shgroup_uniform_mat4_copy(grp, "gpFrameMatrix", frame_mat);
+
+    struct GPUBatch *geom = DRW_cache_gpencil_edit_lines_get(ob, pd->cfra);
+    DRW_shgroup_call_range(grp, ob, geom, start, count);
+  }
+
+  if (pd->edit_gpencil_points_grp) {
+    const bool show_direction = (v3d->gp_flag & V3D_GP_SHOW_STROKE_DIRECTION) != 0;
+
+    DRWShadingGroup *grp = DRW_shgroup_create_sub(pd->edit_gpencil_points_grp);
+    DRW_shgroup_uniform_float_copy(grp, "doStrokeEndpoints", show_direction);
+    DRW_shgroup_uniform_mat4_copy(grp, "gpFrameMatrix", frame_mat);
+
+    struct GPUBatch *geom = DRW_cache_gpencil_edit_points_get(ob, pd->cfra);
+    DRW_shgroup_call_range(grp, ob, geom, start, count);
+  }
+}
+
 static void OVERLAY_edit_gpencil_cache_populate(OVERLAY_Data *vedata, Object *ob)
 {
   OVERLAY_PrivateData *pd = vedata->stl->pd;
@@ -328,22 +395,23 @@ static void OVERLAY_edit_gpencil_cache_populate(OVERLAY_Data *vedata, Object *ob
     return;
   }
 
-  if (pd->edit_gpencil_wires_grp) {
-    DRWShadingGroup *grp = DRW_shgroup_create_sub(pd->edit_gpencil_wires_grp);
-    DRW_shgroup_uniform_vec4_copy(grp, "gpEditColor", gpd->line_color);
+  if (pd->edit_gpencil_wires_grp || pd->edit_gpencil_points_grp) {
 
-    struct GPUBatch *geom = DRW_cache_gpencil_edit_lines_get(ob, pd->cfra);
-    DRW_shgroup_call_no_cull(pd->edit_gpencil_wires_grp, geom, ob);
-  }
+    gpOverlayIterPopulateData data = {
+        .pd = pd,
+        .v3d = v3d,
+        .ob = ob,
+        .gpd = gpd,
+        .use_frame_offset = GP_USE_FRAME_OFFSET_MATRIX(draw_ctx->scene, gpd),
+    };
 
-  if (pd->edit_gpencil_points_grp) {
-    const bool show_direction = (v3d->gp_flag & V3D_GP_SHOW_STROKE_DIRECTION) != 0;
-
-    DRWShadingGroup *grp = DRW_shgroup_create_sub(pd->edit_gpencil_points_grp);
-    DRW_shgroup_uniform_float_copy(grp, "doStrokeEndpoints", show_direction);
-
-    struct GPUBatch *geom = DRW_cache_gpencil_edit_points_get(ob, pd->cfra);
-    DRW_shgroup_call_no_cull(grp, geom, ob);
+    BKE_gpencil_visible_stroke_advanced_iter(draw_ctx->view_layer,
+                                             ob,
+                                             edit_gpencil_overlay_cache_populate_layer_cb,
+                                             NULL,
+                                             &data,
+                                             false,
+                                             pd->cfra);
   }
 
   if (pd->edit_gpencil_curve_handle_grp) {
