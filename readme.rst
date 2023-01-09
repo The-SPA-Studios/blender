@@ -4,33 +4,25 @@
    See 'release/text/readme.html' for the end user read-me.
 
 
-Blender
-=======
+Blender SPA (based on Blender 3.3 LTS)
+======================================
 
 Blender is the free and open source 3D creation suite.
 It supports the entirety of the 3D pipeline-modeling, rigging, animation, simulation, rendering, compositing,
 motion tracking and video editing.
 
-.. figure:: https://code.blender.org/wp-content/uploads/2018/12/springrg.jpg
-   :scale: 50 %
-   :align: center
+This is a snapshot (2023-01-04) of the blender version that is used at the [SPA Studios](https://thespastudios.com).
 
+It includes the following changes (based on Blender 3.3 LTS):
+   - Scene override option in the VSE editor.
+   - New grease pencil C++ based drawing operator.
+   - New plane 3d gizmo for quick stroke manipulations.
+   - Shift & trace functionality.
+   - World space onion skinning.
+   - Grease pencil undo system.
+   - Grease pencil performance improvements.
 
-Project Pages
--------------
-
-- `Main Website <http://www.blender.org>`__
-- `Reference Manual <https://docs.blender.org/manual/en/latest/index.html>`__
-- `User Community <https://www.blender.org/community/>`__
-
-Development
------------
-
-- `Build Instructions <https://wiki.blender.org/wiki/Building_Blender>`__
-- `Code Review & Bug Tracker <https://developer.blender.org>`__
-- `Developer Forum <https://devtalk.blender.org>`__
-- `Developer Documentation <https://wiki.blender.org>`__
-
+_Note that the SPA studios is not expected to provide support on any of the added features._
 
 License
 -------
