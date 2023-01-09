@@ -11,18 +11,19 @@ Blender is the free and open source 3D creation suite.
 It supports the entirety of the 3D pipeline-modeling, rigging, animation, simulation, rendering, compositing,
 motion tracking and video editing.
 
-This is a snapshot (2023-01-04) of the blender version that is used at the [SPA Studios](https://thespastudios.com).
+This is a snapshot (2023-01-04) of the blender version that is used at the `SPA Studios <https://thespastudios.com>`__.
 
 It includes the following changes (based on Blender 3.3 LTS):
-   - Scene override option in the VSE editor.
-   - New grease pencil C++ based drawing operator.
-   - New plane 3d gizmo for quick stroke manipulations.
-   - Shift & trace functionality.
-   - World space onion skinning.
-   - Grease pencil undo system.
-   - Grease pencil performance improvements.
 
-_Note that the SPA studios is not expected to provide support on any of the added features._
+ - Scene override option in the VSE editor.
+ - New grease pencil C++ based drawing operator.
+ - New plane 3d gizmo for quick stroke manipulations.
+ - Shift & trace functionality.
+ - World space onion skinning.
+ - Grease pencil undo system.
+ - Grease pencil performance improvements.
+
+Note that the SPA studios is not expected to provide support on any of the added features.
 
 License
 -------
