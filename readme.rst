@@ -13,6 +13,9 @@ motion tracking and video editing.
 
 This is a snapshot (2023-01-04) of the blender version that is used at the `SPA Studios <https://thespastudios.com>`__.
 
+An online user documentation for Blender SPA and its addons, and windows build
+are `available here <https://the-spa-studios.github.io/blender-spa-userdoc/>`__.
+
 It includes the following changes (based on Blender 3.3 LTS):
 
  - Scene override option in the VSE editor.
